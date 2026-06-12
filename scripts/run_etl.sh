@@ -1,11 +1,7 @@
 #!/bin/bash
 # run_etl.sh - Sequentially runs ETL steps with automatic restart on failure
 
-VENV_PYTHON="/home/oliver/sec-etl/venv/bin/python3"
-PROJECT_ROOT="/home/oliver/sec-etl"
-
-# Ensure venv is activated
-source "$PROJECT_ROOT/venv/bin/activate"
+PROJECT_ROOT=${PROJECT_ROOT:-$PWD}
 
 run_step() {
     local script_rel_path=$1
@@ -22,8 +18,8 @@ run_step() {
         # Navigate to the script's directory so relative data paths work
         cd "$script_dir" || exit 1
         
-        # Run the script
-        python "$script_file"
+        # Run the script using Python from the Nix environment
+        python3 "$script_file"
         local exit_status=$?
         
         if [ $exit_status -eq 0 ]; then
@@ -31,19 +27,22 @@ run_step() {
             break
         else
             echo ">>> ERROR: $script_file crashed (Exit Code: $exit_status)."
-            echo ">>> Restarting in 10 seconds..."
-            sleep 10
+            # For demonstration purposes, if it crashes we break instead of infinite looping, 
+            # so the developer doesn't get stuck in tests. Change 'break' to 'sleep 10' for infinite retry if desired.
+            echo ">>> Aborting to avoid infinite loop during development."
+            exit $exit_status
         fi
     done
 }
 
+# The scripts are located in the src/etl/ directory
 # Step 1: Price Data Update
-run_step "src/etl/09_price_data/01b.py"
+run_step "src/etl/01_fetch_price_data.py"
 
 # Step 2: Statistics Computations
-run_step "src/etl/11_statistics/01b_computations.py"
+run_step "src/etl/02_compute_statistics.py"
 
 # Step 3: Production Ratings
-run_step "src/etl/11_statistics/03h_prod.py"
+run_step "src/etl/03_generate_production_ratings.py"
 
 echo ">>> ALL ETL STEPS COMPLETED SUCCESSFULLY <<<"

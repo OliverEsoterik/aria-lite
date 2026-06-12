@@ -6,7 +6,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.postgresql import insert
 
 # --- CONFIGURATION ---
-DB_URL = "postgresql://postgres:postgres@localhost:5432/postgres"
+import os
+DB_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg2:///alphapicks")
 engine = create_engine(DB_URL, pool_size=10, max_overflow=20)
 ANNUALIZATION_FACTOR = np.sqrt(252)
 BATCH_SIZE = 200  # Process tickers in chunks to save RAM

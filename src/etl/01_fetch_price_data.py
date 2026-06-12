@@ -6,7 +6,7 @@ from typing import List, Dict, Optional
 from sqlalchemy import create_engine, text
 
 # --- Configuration ---
-DB_CONN_STR = "postgresql+psycopg2://postgres:postgres@localhost:5432/postgres"
+DB_CONN_STR = os.environ.get("DATABASE_URL", "postgresql+psycopg2:///alphapicks")
 TICKER_LIST_PATH = "../../../data/tickers_to_trade2.json"
 DEFAULT_START_DATE = (pd.Timestamp.today() - pd.DateOffset(years=10)).strftime('%Y-%m-%d')
 

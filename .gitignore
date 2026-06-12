@@ -1,0 +1,7 @@
+# Local PostgreSQL database data
+.db_data/
+
+# Python cache and environments
+__pycache__/
+*.pyc
+.venv/
