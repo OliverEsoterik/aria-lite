@@ -133,10 +133,7 @@ def process_ticker_batch(engine, tickers):
                 continue
 
             # Standardize DataFrame Timezone
-            if df['timestamp'].dt.tz is None:
-                df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
-            else:
-                df['timestamp'] = df['timestamp'].dt.tz_convert('UTC')
+            df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
 
             # Calculation
             df = calculate_metrics(df)

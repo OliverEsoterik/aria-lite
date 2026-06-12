@@ -36,6 +36,9 @@ run_step() {
 }
 
 # The scripts are located in the src/etl/ directory
+# Step 0: Populate Entities from SEC
+run_step "src/etl/00_populate_entities.py"
+
 # Step 1: Price Data Update
 run_step "src/etl/01_fetch_price_data.py"
 

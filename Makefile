@@ -1,4 +1,4 @@
-.PHONY: setup start-db stop-db migrate run clean
+.PHONY: setup start-db stop-db stop status migrate run clean
 
 setup: start-db migrate
 	./scripts/run_etl.sh
@@ -19,10 +19,29 @@ start-db:
 	@psql -h $(PGHOST) -p $(PGPORT) -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'alphapicks'" | grep -q 1 || createdb -h $(PGHOST) -p $(PGPORT) alphapicks
 	@psql -h $(PGHOST) -p $(PGPORT) -d alphapicks -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
 
+stop: stop-db
+
 stop-db:
 	@if [ -d "$(DB_PATH)" ] && pg_isready -h $(PGHOST) -p $(PGPORT) > /dev/null 2>&1; then \
+		echo ">>> Stopping PostgreSQL..."; \
 		pg_ctl -D $(DB_PATH) stop; \
+	else \
+		echo ">>> PostgreSQL is not running."; \
 	fi
+
+status:
+	@echo "========================================"
+	@echo "Database Status Check"
+	@echo "========================================"
+	@if [ -d "$(DB_PATH)" ] && pg_isready -h $(PGHOST) -p $(PGPORT) > /dev/null 2>&1; then \
+		printf "Status:   [\033[32mRUNNING\033[0m]\n"; \
+		echo "Port:     $(PGPORT)"; \
+		echo "Host:     $(PGHOST)"; \
+		echo "Database: alphapicks"; \
+	else \
+		printf "Status:   [\033[31mOFFLINE\033[0m]\n"; \
+	fi
+	@echo "========================================"
 
 migrate: start-db
 	@echo "Applying database migrations..."

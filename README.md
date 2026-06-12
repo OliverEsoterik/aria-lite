@@ -43,8 +43,9 @@ We use a `Makefile` to orchestrate local development tasks cleanly. Once inside 
 
 * `make setup`: **(First-time only)** Initializes the database cluster, installs the TimescaleDB extension, applies SQL schema (`sql/01_init_schema.sql`), and executes the ETL pipeline (`scripts/run_etl.sh`).
 * `make run`: The standard command to run your daily scripts. It ensures the database is running in the background and executes the ETL pipeline.
+* `make status`: Checks the current state of the local PostgreSQL database, including its connection port and host path.
 * `make start-db`: Starts the local PostgreSQL database in the background.
-* `make stop-db`: Gracefully shuts down the background PostgreSQL database.
+* `make stop`: Gracefully shuts down the background PostgreSQL database (alias for `make stop-db`).
 * `make migrate`: Manually applies the SQL schema changes. (Already included in `make setup`).
 * `make clean`: **(Warning)** Shuts down the database and deletes the local database data folder (`.db_data`). Use this if you want to wipe everything and start from scratch.
 
