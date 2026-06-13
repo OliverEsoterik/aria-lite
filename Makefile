@@ -1,4 +1,4 @@
-.PHONY: setup start-db stop-db stop status migrate run clean
+.PHONY: setup start-db stop-db stop status migrate run ratings clean
 
 setup: start-db migrate
 	./scripts/run_etl.sh
@@ -50,6 +50,10 @@ migrate: start-db
 run: start-db
 	@echo "Running daily services..."
 	./scripts/run_etl.sh
+
+ratings: start-db
+	@echo "Generating production ratings..."
+	cd src/etl && python3 03_generate_production_ratings.py
 
 clean: stop-db
 	rm -rf $(DB_PATH)
