@@ -73,3 +73,66 @@ Upon running `nix develop`, the environment automatically sets up the following 
 
 ### ETL Scripts
 Python scripts (`src/etl/01_fetch_price_data.py`, `src/etl/02_compute_statistics.py`, `src/etl/03_generate_production_ratings.py`) execute using the dependencies pinned in the Nix environment. Database connections intelligently read from the environment variables, meaning no hardcoded credentials are used.
+
+---
+
+### ❄️ NixOS System Integration
+
+Alpha Picks can be integrated directly into your NixOS system configuration as a scheduled background task without modifying the source code.
+
+#### 1. Add to your Flake Inputs
+Add this repository to your system's `flake.nix`:
+
+```nix
+inputs.alphapicks.url = "git+https://github.com/OliverEsoterik/aria-lite.git";
+```
+
+#### 2. Define a Systemd Service
+In your NixOS configuration, you can create a service that runs the ETL pipeline daily. This example assumes you want to run it at 3:00 AM using your system's existing PostgreSQL service.
+
+```nix
+{ config, pkgs, inputs, ... }: 
+let
+  # Create a package from the flake input
+  alphapicks-pkg = inputs.alphapicks.packages.${pkgs.system}.default;
+  
+  # Configuration
+  dataDir = "/var/lib/alphapicks";
+  dbUrl = "postgresql+psycopg2:///alphapicks";
+in {
+  # 1. Ensure the data directory exists
+  systemd.tmpfiles.rules = [
+    "d ${dataDir} 0750 alphapicks alphapicks -"
+  ];
+
+  # 2. Define the ETL Service
+  systemd.services.alphapicks-etl = {
+    description = "Alpha Picks Daily ETL Pipeline";
+    serviceConfig = {
+      Type = "oneshot";
+      User = "alphapicks";
+      StateDirectory = "alphapicks";
+      WorkingDirectory = "${alphapicks-pkg}";
+      ExecStart = "${alphapicks-pkg}/scripts/run_etl.sh";
+    };
+    environment = {
+      PROJECT_ROOT = "${alphapicks-pkg}";
+      DATABASE_URL = dbUrl;
+      # Point to your system's Postgres socket if needed
+      PGHOST = "/run/postgresql"; 
+    };
+  };
+
+  # 3. Schedule the run (Daily at 3 AM)
+  systemd.timers.alphapicks-etl = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "*-*-* 03:00:00";
+      Persistent = true;
+    };
+  };
+}
+```
+
+**Note:** This setup requires that your system's PostgreSQL has the `timescaledb` extension enabled and a database named `alphapicks` created.
+
