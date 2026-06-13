@@ -1,5 +1,0 @@
-1. everytime when script 3 is running it gives these ranking with STRONG BUY, HOLD, SELL. Everyime when script 3 is running it happens on a specific day. So right now the data is overwritten each day (i assume) - but i want to additionally save the date information. so that I am able to compare that data with data of the day before and so on.. 
-2. when script 3 is running it gives these ranking with STRONG BUY, BUY, HOLD, SELL, etc.. I would like to know how many days a specific ticker is on this ranking. 
-3. all the data we request in script number 3 i actually also want to write into a new table. then write a script number 4 which gives me all this most recent information but by requesting it from the new table and not from requesting yfinance directly.
-4. then i want another script which i can run in the command line and paste one or multiple tickers behind and get the information from this table as well.. so like ./evaluate - t "AVGO, MU" or something like that..
-5. have a make command which only triggers script 03_generate_statistics
