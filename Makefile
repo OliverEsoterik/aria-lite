@@ -49,7 +49,11 @@ migrate: start-db
 
 run: start-db
 	@echo "Running daily services..."
-	./scripts/run_etl.sh
+	./scripts/run_etl.sh --skip-entities
+
+statistics: start-db
+	@echo "Computing statistics..."
+	cd src/etl && python3 02_compute_statistics.py
 
 ratings: start-db
 	@echo "Generating production ratings..."
