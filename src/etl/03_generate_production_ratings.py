@@ -7,7 +7,7 @@ import numpy as np
 import os
 DB_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg2:///alphapicks")
 engine = create_engine(DB_URL, pool_size=10, max_overflow=20)
-CURRENT_PORTFOLIO = ['APLD', 'BE', 'CLSK', 'CRWV', 'INTC', 'IREN', 'KEEL', 'RIOT', 'SNDK', 'TE', 'TSM', 'ESLT', 'APH', 'AVGO', 'CRDO', 'VISN', 'CIEN', 'AMD', 'CLS', 'MU', 'BKNG', 'MELI', 'ARES', 'TMO', 'STX', 'ANET', 'FSLR', 'COMM', 'NFLX', 'AS', 'ARM', 'ALAB', 'DELL', 'INCY', 'MRVL', 'NU', 'TTD', 'VEEV', 'WDAY', 'SOFI', 'WDC', 'WLDN', 'BLK', 'META', 'BRK-B', 'PLTR', 'GOOG', 'PEP', 'MSFT', 'NVO', 'ACN', 'ARES', 'JPM', 'BNS', 'AXP', 'V', 'BN', 'IREN', 'PANW', 'NET', 'STX', 'TSM', 'NVDA', 'NOW', 'BX']
+CURRENT_PORTFOLIO = ['GOOG', 'GOOGL', 'APLD', 'BE', 'CLSK', 'CRWV', 'INTC', 'IREN', 'KEEL', 'RIOT', 'SNDK', 'TE', 'TSM', 'ESLT', 'APH', 'AVGO', 'CRDO', 'VISN', 'CIEN', 'AMD', 'CLS', 'MU', 'BKNG', 'MELI', 'ARES', 'TMO', 'STX', 'ANET', 'FSLR', 'COMM', 'NFLX', 'AS', 'ARM', 'ALAB', 'DELL', 'INCY', 'MRVL', 'NU', 'TTD', 'VEEV', 'WDAY', 'SOFI', 'WDC', 'WLDN', 'BLK', 'META', 'BRK-B', 'PLTR', 'GOOG', 'PEP', 'MSFT', 'NVO', 'ACN', 'ARES', 'JPM', 'BNS', 'AXP', 'V', 'BN', 'IREN', 'PANW', 'NET', 'STX', 'TSM', 'NVDA', 'NOW', 'BX']
 
 # --- 1. The Risk Gate (Toxic Waste Filter) ---
 class RiskGate:

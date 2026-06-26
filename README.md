@@ -31,7 +31,7 @@ For day-to-day development, you simply need to enter the Nix environment and sta
 # 1. Enter the Nix environment
 nix develop
 
-# 2. Start the database (if offline) and run daily scripts
+# 2. Start the database (if offline) and run daily scripts (skips entity population)
 make run
 ```
 
@@ -41,7 +41,7 @@ make run
 
 We use a `Makefile` to orchestrate local development tasks cleanly. Once inside `nix develop`, you have access to the following commands:
 
-* `make setup`: **(First-time only)** Initializes the database cluster, installs the TimescaleDB extension, applies SQL schema (`sql/01_init_schema.sql`), and executes the ETL pipeline (`scripts/run_etl.sh`).
+* `make setup`: **(First-time only)** Initializes the database cluster, installs the TimescaleDB extension, applies SQL schema (`sql/01_init_schema.sql`), and executes the full ETL pipeline including entity population (`scripts/run_etl.sh`).
 * `make run`: The standard command to run your daily scripts. It ensures the database is running in the background and executes the ETL pipeline.
 * `make ratings`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
 * `make status`: Checks the current state of the local PostgreSQL database, including its connection port and host path.
@@ -113,7 +113,7 @@ in {
       User = "alphapicks";
       StateDirectory = "alphapicks";
       WorkingDirectory = "${alphapicks-pkg}";
-      ExecStart = "${alphapicks-pkg}/scripts/run_etl.sh";
+      ExecStart = "${alphapicks-pkg}/scripts/run_etl.sh --skip-entities";
     };
     environment = {
       PROJECT_ROOT = "${alphapicks-pkg}";

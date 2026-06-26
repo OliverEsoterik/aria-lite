@@ -1,43 +1,64 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # run_etl.sh - Sequentially runs ETL steps with automatic restart on failure
+# Usage: ./scripts/run_etl.sh [--skip-entities]
+#   --skip-entities   Skip the 00_populate_entities.py step (useful for daily runs)
+
+set -euo pipefail
 
 PROJECT_ROOT=${PROJECT_ROOT:-$PWD}
+SKIP_ENTITY_POPULATION=false
 
+# --- Parse CLI arguments ---
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --skip-entities)
+            SKIP_ENTITY_POPULATION=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Usage: $0 [--skip-entities]" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# --- Step runner ---
 run_step() {
     local script_rel_path=$1
     local script_abs_path="$PROJECT_ROOT/$script_rel_path"
     local script_dir=$(dirname "$script_abs_path")
     local script_file=$(basename "$script_abs_path")
-    
+
     while true; do
         echo "=========================================================="
         echo ">>> STARTING STEP: $script_file"
         echo ">>> Directory: $script_dir"
         echo "=========================================================="
-        
+
         # Navigate to the script's directory so relative data paths work
         cd "$script_dir" || exit 1
-        
+
         # Run the script using Python from the Nix environment
         python3 "$script_file"
         local exit_status=$?
-        
+
         if [ $exit_status -eq 0 ]; then
             echo ">>> SUCCESS: $script_file finished successfully."
             break
         else
             echo ">>> ERROR: $script_file crashed (Exit Code: $exit_status)."
-            # For demonstration purposes, if it crashes we break instead of infinite looping, 
-            # so the developer doesn't get stuck in tests. Change 'break' to 'sleep 10' for infinite retry if desired.
             echo ">>> Aborting to avoid infinite loop during development."
             exit $exit_status
         fi
     done
 }
 
-# The scripts are located in the src/etl/ directory
-# Step 0: Populate Entities from SEC
-run_step "src/etl/00_populate_entities.py"
+# --- Run the pipeline ---
+if [ "$SKIP_ENTITY_POPULATION" = false ]; then
+    # Step 0: Populate Entities from SEC (only on initial setup)
+    run_step "src/etl/00_populate_entities.py"
+fi
 
 # Step 1: Price Data Update
 run_step "src/etl/01_fetch_price_data.py"
