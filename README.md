@@ -70,9 +70,19 @@ Upon running `nix develop`, the environment automatically sets up the following 
 * `PGHOST`: Path to your local `.db_data` socket directory
 * `PGPORT`: `5432`
 * `PROJECT_ROOT`: Absolute path to this repository
+* `SEC_EMAIL`: Email address used for SEC API authentication (defaults to `oliver.esoterik@gmail.com`). Can be overridden via environment or passed to `make`: `make setup SEC_EMAIL=you@example.com`
 
 ### ETL Scripts
-Python scripts (`src/etl/01_fetch_price_data.py`, `src/etl/02_compute_statistics.py`, `src/etl/03_generate_production_ratings.py`) execute using the dependencies pinned in the Nix environment. Database connections intelligently read from the environment variables, meaning no hardcoded credentials are used.
+Python scripts (`src/etl/00_populate_entities.py`, `src/etl/01_fetch_price_data.py`, `src/etl/02_compute_statistics.py`, `src/etl/03_generate_production_ratings.py`) execute using the dependencies pinned in the Nix environment. Database connections intelligently read from the environment variables, meaning no hardcoded credentials are used.
+
+**SEC API Authentication:** The entity population script (`00_populate_entities.py`) sends a `User-Agent` header containing an email address, as required by the SEC. This is read from the `SEC_EMAIL` environment variable, defaulting to `oliver.esoterik@gmail.com` if not set. To use a different email, set the variable before running:
+```bash
+# Via environment
+SEC_EMAIL=you@example.com make setup
+
+# Or as a Make argument
+make setup SEC_EMAIL=you@example.com
+```
 
 ---
 
@@ -119,7 +129,9 @@ in {
       PROJECT_ROOT = "${alphapicks-pkg}";
       DATABASE_URL = dbUrl;
       # Point to your system's Postgres socket if needed
-      PGHOST = "/run/postgresql"; 
+      PGHOST = "/run/postgresql";
+      # Email for SEC API authentication (required by SEC rate-limiting policy)
+      SEC_EMAIL = "your-sec-contact@example.com";
     };
   };
 

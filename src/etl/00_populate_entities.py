@@ -5,7 +5,8 @@ import os
 
 # --- CONFIGURATION ---
 URL = "https://www.sec.gov/files/company_tickers_exchange.json"
-HEADERS = {"User-Agent": "oliver.esoterik@gmail.com"}
+SEC_EMAIL = os.environ.get("SEC_EMAIL", "oliver.esoterik@gmail.com")
+HEADERS = {"User-Agent": SEC_EMAIL}
 
 # Dynamically connect to the local Unix socket DB
 DB_URL = os.environ.get("DATABASE_URL", "postgresql:///alphapicks")

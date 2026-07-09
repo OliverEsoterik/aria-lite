@@ -1,5 +1,9 @@
+# Email to use for SEC API authentication (can be overridden via environment or command line)
+SEC_EMAIL ?= your.email@gmail.com
+
 .PHONY: setup start-db stop-db stop status migrate run ratings clean
 
+setup: export SEC_EMAIL
 setup: start-db migrate
 	./scripts/run_etl.sh
 
