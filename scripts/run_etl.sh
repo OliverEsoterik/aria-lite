@@ -57,7 +57,8 @@ run_step() {
 # --- Run the pipeline ---
 if [ "$SKIP_ENTITY_POPULATION" = false ]; then
     # Step 0: Populate Entities from SEC (only on initial setup)
-    run_step "src/etl/00_populate_entities.py"
+    SEC_USER_AGENT_EMAIL="$SEC_USER_AGENT_EMAIL" \
+        run_step "src/etl/00_populate_entities.py"
 fi
 
 # Step 1: Price Data Update
