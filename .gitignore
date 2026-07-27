@@ -8,3 +8,8 @@ __pycache__/
 
 # Agent related
 .pi/
+
+# Tests
+tests/__pycache__/
+htmlcov/
+.coverage

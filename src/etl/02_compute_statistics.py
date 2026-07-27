@@ -9,8 +9,9 @@ from sqlalchemy.dialects.postgresql import insert
 import os
 DB_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg2:///alphapicks")
 engine = create_engine(DB_URL, pool_size=10, max_overflow=20)
-ANNUALIZATION_FACTOR = np.sqrt(252)
+from common import yang_zhang_vol, ANNUALIZATION_FACTOR
 BATCH_SIZE = 200  # Process tickers in chunks to save RAM
+
 
 # --- PRODUCTION UPSERT METHOD ---
 def postgres_upsert(table, conn, keys, data_iter):
@@ -64,7 +65,10 @@ def calculate_metrics(df):
     g_ret = df.groupby('ticker')['log_return']
     
     # min_periods=10 ensures we don't calculate noise on 1 or 2 days of data
-    df['vol_20'] = g_ret.transform(lambda x: x.rolling(20, min_periods=10).std() * np.sqrt(252))
+    # Yang-Zhang range-based volatility (uses OHLC, 7-8x more efficient)
+    df['vol_20'] = grouped.apply(
+        lambda g: yang_zhang_vol(g, period=20, min_periods=10)
+    ).reset_index(level=0, drop=True)
     df['skew_20'] = g_ret.transform(lambda x: x.rolling(20, min_periods=10).skew())
     df['kurt_20'] = g_ret.transform(lambda x: x.rolling(20, min_periods=10).kurt())
 
@@ -117,7 +121,7 @@ def process_ticker_batch(engine, tickers):
             start_date = last_ts - pd.Timedelta(days=400) if last_ts else pd.Timestamp('2015-01-01').tz_localize('UTC')
 
             query_prices = text("""
-                SELECT timestamp, ticker, price_close, price_adjusted
+                SELECT timestamp, ticker, price_open, price_high, price_low, price_close, price_adjusted
                 FROM market_prices 
                 WHERE ticker = :ticker 
                 AND timestamp >= :start_date

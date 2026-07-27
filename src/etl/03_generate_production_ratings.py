@@ -7,27 +7,13 @@ import numpy as np
 import os
 DB_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg2:///alphapicks")
 engine = create_engine(DB_URL, pool_size=10, max_overflow=20)
+
+from common import yang_zhang_vol, RiskGate, assign_production_rating, z_score, ANNUALIZATION_FACTOR
+
+
 CURRENT_PORTFOLIO = ['GOOG', 'GOOGL', 'APLD', 'BE', 'CLSK', 'CRWV', 'INTC', 'IREN', 'KEEL', 'RIOT', 'SNDK', 'TE', 'TSM', 'ESLT', 'APH', 'AVGO', 'CRDO', 'VISN', 'CIEN', 'AMD', 'CLS', 'MU', 'BKNG', 'MELI', 'ARES', 'TMO', 'STX', 'ANET', 'FSLR', 'COMM', 'NFLX', 'AS', 'ARM', 'ALAB', 'DELL', 'INCY', 'MRVL', 'NU', 'TTD', 'VEEV', 'WDAY', 'SOFI', 'WDC', 'WLDN', 'BLK', 'META', 'BRK-B', 'PLTR', 'GOOG', 'PEP', 'MSFT', 'NVO', 'ACN', 'ARES', 'JPM', 'BNS', 'AXP', 'V', 'BN', 'IREN', 'PANW', 'NET', 'STX', 'TSM', 'NVDA', 'NOW', 'BX']
 
 # --- 1. The Risk Gate (Toxic Waste Filter) ---
-class RiskGate:
-    def __init__(self):
-        self.min_price = 10.0           # Institutional floor
-        self.min_op_margin = 0.05       # Profitability floor
-        self.min_current_ratio = 0.8    # Liquidity floor
-        self.min_roe = -0.10            # Solvency floor
-
-    def is_pass(self, row):
-        try:
-            if row.get('current_price', 0) < self.min_price: return False
-            if row.get('op_margin', 0) < self.min_op_margin: return False
-            if row.get('current_ratio', 0) < self.min_current_ratio: return False
-            if row.get('roe', 0) < self.min_roe: return False
-            if row.get('fwd_pe') is None: return False
-            return True
-        except Exception:
-            return False
-
 # --- 2. Data Fetching & Momentum Logic ---
 def get_extensive_fundamentals(ticker):
     try:
@@ -86,7 +72,7 @@ def calculate_momentum_metrics(engine, tickers):
     if not tickers: return pd.DataFrame()
     
     query = text("""
-        SELECT ticker, price_close, timestamp FROM market_prices 
+        SELECT ticker, price_open, price_high, price_low, price_close, timestamp FROM market_prices 
         WHERE ticker IN :tickers AND timestamp >= NOW() - INTERVAL '400 days'
         ORDER BY ticker, timestamp ASC
     """)
@@ -101,31 +87,47 @@ def calculate_momentum_metrics(engine, tickers):
         
         # A. VOLATILITY & RETURNS
         group['returns'] = group['price_close'].pct_change()
-        vol = group['returns'].std() * np.sqrt(252) # Annualized Vol
+        vol = yang_zhang_vol(group, period=len(group), min_periods=10).iloc[-1] # Yang-Zhang annualized vol
         
-        # B. PRICE POINTS (Now, 1m, 3m, 12m)
+        # B. PRICE POINTS (Now, 1m, 3m, 6m, 12m)
         p_now = group['price_close'].iloc[-1]
         p_1m = group['price_close'].iloc[-21]
         p_3m = group['price_close'].iloc[-63]
-        
-        # C. MOMENTUM SPEEDS
-        # 12-1 Institutional Momentum (Persistence)
+
+        # 6-month price point (for multi-lookback combination)
+        if available_days >= 126:
+            p_6m = group['price_close'].iloc[-126]
+        else:
+            p_6m = group['price_close'].iloc[0]  # fallback
+
+        # 12-month price point
         if available_days >= 252:
             p_12m = group['price_close'].iloc[-252]
-            mom_12m = (p_1m / p_12m) - 1
         else:
-            mom_12m = (p_1m / group['price_close'].iloc[0]) - 1 # Fallback for WDC
+            p_12m = group['price_close'].iloc[0]  # fallback
+        
+        # C. MOMENTUM SPEEDS (Multi-Lookback)
+        # 3m Fast Momentum (skip last month to avoid reversal)
+        mom_3m = (p_1m / p_3m) - 1
 
-        # 3m Fast Momentum (The Spark)
-        mom_3m = (p_now / p_3m) - 1
+        # 6m Intermediate Momentum
+        mom_6m = (p_1m / p_6m) - 1
+
+        # 12-1 Institutional Momentum (Persistence)
+        mom_12m = (p_1m / p_12m) - 1
+
+        # Combined Momentum (weighted average across lookbacks)
+        # 3m captures short-term continuation, 6m intermediate, 12m persistence
+        mom_combined = 0.3 * mom_3m + 0.3 * mom_6m + 0.4 * mom_12m
 
         # D. ELITE FACTORS
         # 1. RISK-ADJUSTED (Standard Institutional)
-        adj_mom = mom_12m / (vol + 1e-6)
+        adj_mom = mom_combined / (vol + 1e-6)
         
         # 2. ACCELERATION (Freshness)
         # Is the car speeding up? High accel = Fresh breakout.
-        acceleration = mom_3m - mom_12m
+        # Use current 3m return (including last month) vs 12m to capture the spark
+        acceleration = (p_now / p_3m) - 1 - mom_12m
         
         # 3. MOMENTUM QUALITY (Quiet vs Loud)
         # sign(Return) * [% Days Positive - % Days Negative]
@@ -135,73 +137,19 @@ def calculate_momentum_metrics(engine, tickers):
 
         results.append({
             'ticker': ticker,
-            'mom_score': adj_mom,      # Persistence (Long)
-            'mom_quality': inf_discr,   # Consistency (Quietness)
-            'acceleration': acceleration, # Freshness (Early Entry)
-            'annual_vol': vol,
-            'near_high': p_now / group['price_close'].max()
+            'mom_score': adj_mom,           # Combined risk-adjusted momentum
+            'mom_quality': inf_discr,       # Consistency (Quietness)
+            'acceleration': acceleration,   # Freshness (Early Entry)
+            'annual_vol': vol,              # Yang-Zhang annualized vol
+            'near_high': p_now / group['price_close'].max(),
+            'mom_3m': mom_3m,               # 3-month momentum (for rating logic)
+            'mom_6m': mom_6m,               # 6-month momentum
+            'mom_12m': mom_12m,             # 12-month momentum
         })
 
     return pd.DataFrame(results)
 
 # --- 3. The "Elite 10" Rating Logic ---
-def assign_production_rating(row):
-    # Core variables
-    score, eps_rev, mom = row.get('final_score', 0), row.get('eps_rev', 0), row.get('mom_score', 0)
-    pe, peg, rev_growth = row.get('fwd_pe', 999), row.get('peg', 99), row.get('rev_growth', 0)
-    op_margin = row.get('op_margin', 0)
-    
-    # NEW: Elite Early Entry metrics from calculate_momentum_metrics
-    accel = row.get('acceleration', 0)
-    near_high = row.get('near_high', 0)
-    mom_3m = row.get('mom_3m', 0)
-
-    # 1. EXIT TRIGGERS (Aggressive Capital Protection)
-    if eps_rev < -0.03:    return "SELL (Estimate Decay)"
-    if rev_growth < 0:      return "SELL (No Growth)"
-    if mom < -0.10:        return "SELL (Trend Exhaustion)"
-
-    # 2. THE "EARLY BIRD" SIGNAL (Emerging Momentum)
-    # This catches stocks like WDC early. 
-    # Criteria: High 3m speed + positive acceleration + very close to new highs.
-    is_breakout = (near_high > 0.96) # Within 4% of 52-week high
-    is_accelerating = (accel > 0.05) and (mom_3m > 0.10)
-    
-    if is_breakout and is_accelerating and peg < 1.5:
-        return "STRONG BUY (Emerging Breakout)"
-
-    # 3. HYPER-GROWTH EXCEPTION
-    if rev_growth > 0.50 and mom > 0.25 and peg < 1.2:
-        return "STRONG BUY (Hyper-Growth)"
-
-    # 4. STRONG BUY (Elite Conviction)
-    is_confluence = (eps_rev > 0.01) and (mom > 0.1)
-    is_profitable = (op_margin > 0)
-    is_fair_value = (peg < 1.8) and (pe < 60)
-
-    if score > 0.42 and is_confluence and is_profitable and is_fair_value:
-        return "STRONG BUY (Elite)"
-
-    # 5. BUY (High Potential)
-    if score > 0.35 and mom > 0.1 and peg < 2.0:
-        return "BUY"
-
-    # 6. HOLD/OVERVALUED
-    if pe > 65 or peg > 3.0: return "HOLD (Overvalued)"
-    if mom < 0:              return "HOLD (Consolidation)"
-    
-    return "HOLD"
-
-# --- 4. Main Pipeline Funnel ---
-import time
-import pandas as pd
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500):
-    # Step A: Fetch Broad Universe
-    df = pd.read_sql("SELECT DISTINCT ON (ticker) ticker, sma_252, vol_20, rsi_14 FROM statistics ORDER BY ticker, timestamp DESC", engine)
-    if df.empty: return None, None
-
     # Persistence Injection
     portfolio_df = df[df['ticker'].isin(CURRENT_PORTFOLIO)].copy()
 
@@ -249,7 +197,7 @@ def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500):
     final_merged = research_pool.merge(fund_df, on='ticker', how='left')
 
     # --- Step F: ELITE Z-SCORE NORMALIZATION ---
-    def z_score(s): return (s - s.mean()) / (s.std() + 1e-6)
+    # z_score is imported from common
     
     final_merged['z_mom_risk_adj'] = z_score(final_merged['mom_score'].fillna(0))
     final_merged['z_mom_qual'] = z_score(final_merged['mom_quality'].fillna(0))
