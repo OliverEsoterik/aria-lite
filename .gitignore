@@ -13,3 +13,13 @@ __pycache__/
 tests/__pycache__/
 htmlcov/
 .coverage
+
+# Skills (project-specific agent skills, not source code)
+skills/
+
+# Docs (implementation plans, not source code)
+docs/
+
+# Python egg-info (build artifacts)
+*.egg-info/
+src/*.egg-info/
