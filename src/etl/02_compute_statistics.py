@@ -66,9 +66,12 @@ def calculate_metrics(df):
     
     # min_periods=10 ensures we don't calculate noise on 1 or 2 days of data
     # Yang-Zhang range-based volatility (uses OHLC, 7-8x more efficient)
-    df['vol_20'] = grouped.apply(
-        lambda g: yang_zhang_vol(g, period=20, min_periods=10)
-    ).reset_index(level=0, drop=True)
+    # Iterate groups to avoid pandas apply() shape issues (DataFrame -> single col)
+    grouped_vol = df.groupby('ticker')
+    vol = pd.Series(index=df.index, dtype=float)
+    for name, group in grouped_vol:
+        vol.loc[group.index] = yang_zhang_vol(group, period=20, min_periods=10).values
+    df['vol_20'] = vol
     df['skew_20'] = g_ret.transform(lambda x: x.rolling(20, min_periods=10).skew())
     df['kurt_20'] = g_ret.transform(lambda x: x.rolling(20, min_periods=10).kurt())
 

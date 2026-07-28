@@ -10,6 +10,9 @@ engine = create_engine(DB_URL, pool_size=10, max_overflow=20)
 
 from common import yang_zhang_vol, RiskGate, assign_production_rating, z_score, ANNUALIZATION_FACTOR
 
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 CURRENT_PORTFOLIO = ['GOOG', 'GOOGL', 'APLD', 'BE', 'CLSK', 'CRWV', 'INTC', 'IREN', 'KEEL', 'RIOT', 'SNDK', 'TE', 'TSM', 'ESLT', 'APH', 'AVGO', 'CRDO', 'VISN', 'CIEN', 'AMD', 'CLS', 'MU', 'BKNG', 'MELI', 'ARES', 'TMO', 'STX', 'ANET', 'FSLR', 'COMM', 'NFLX', 'AS', 'ARM', 'ALAB', 'DELL', 'INCY', 'MRVL', 'NU', 'TTD', 'VEEV', 'WDAY', 'SOFI', 'WDC', 'WLDN', 'BLK', 'META', 'BRK-B', 'PLTR', 'GOOG', 'PEP', 'MSFT', 'NVO', 'ACN', 'ARES', 'JPM', 'BNS', 'AXP', 'V', 'BN', 'IREN', 'PANW', 'NET', 'STX', 'TSM', 'NVDA', 'NOW', 'BX']
 
@@ -149,7 +152,12 @@ def calculate_momentum_metrics(engine, tickers):
 
     return pd.DataFrame(results)
 
-# --- 3. The "Elite 10" Rating Logic ---
+# --- 4. Main Pipeline Funnel ---
+def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500):
+    # Step A: Fetch Broad Universe
+    df = pd.read_sql("SELECT DISTINCT ON (ticker) ticker, sma_252, vol_20, rsi_14 FROM statistics ORDER BY ticker, timestamp DESC", engine)
+    if df.empty: return None, None
+
     # Persistence Injection
     portfolio_df = df[df['ticker'].isin(CURRENT_PORTFOLIO)].copy()
 
