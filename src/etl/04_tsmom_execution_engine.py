@@ -149,7 +149,7 @@ class TSMOMExecutionEngine:
             return "HOLD"
 
 
-def fetch_portfolio_prices(engine, tickers: List[str], lookback_days: int = 400) -> pd.DataFrame:
+def fetch_portfolio_prices(engine, tickers: List[str]) -> pd.DataFrame:
     """
     Fetch adjusted close prices for a list of tickers from the DB.
 
@@ -170,13 +170,13 @@ def fetch_portfolio_prices(engine, tickers: List[str], lookback_days: int = 400)
                 ELSE price_close::double precision
             END AS adj_close
         FROM market_prices
-        WHERE ticker = ANY(:tickers)
-          AND timestamp >= NOW() - (:days * INTERVAL '1 day')
+        WHERE ticker IN :tickers
+          AND timestamp >= NOW() - INTERVAL '400 days'
         ORDER BY ticker, date ASC
     """)
 
     with engine.connect() as conn:
-        raw = pd.read_sql(query, conn, params={"tickers": tickers, "days": lookback_days})
+        raw = pd.read_sql(query, conn, params={"tickers": tuple(tickers)})
 
     if raw.empty:
         return pd.DataFrame()
@@ -282,7 +282,7 @@ def main() -> None:
 
     print(f"[INFO] Fetching price history for {len(tickers)} tickers...")
     db_engine = create_engine(DB_URL, pool_size=5, max_overflow=10)
-    prices = fetch_portfolio_prices(db_engine, tickers, lookback_days=400)
+    prices = fetch_portfolio_prices(db_engine, tickers)
 
     if prices.empty:
         sys.exit("[ERROR] No price data returned from DB. Is the database running?")
