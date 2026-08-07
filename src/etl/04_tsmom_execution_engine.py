@@ -59,6 +59,7 @@ class TSMOMExecutionEngine:
         self,
         daily_prices: pd.DataFrame,
         current_weights: Dict[str, float],
+        actionable_only: bool = True,
     ) -> pd.DataFrame:
         """
         Compute TSMOM execution orders.
@@ -129,12 +130,14 @@ class TSMOMExecutionEngine:
             )
 
         df = pd.DataFrame(records).set_index("Ticker")
-        actionable = df[df["Action"] != "HOLD"].copy()
 
-        _priority = {"SELL": 0, "BUY": 1, "REBALANCE": 2}
-        actionable["_p"] = actionable["Action"].map(_priority)
-        actionable = actionable.sort_values(["_p", "Weight_Delta"]).drop(columns=["_p"])
-        return actionable
+        _priority = {"SELL": 0, "BUY": 1, "REBALANCE": 2, "HOLD": 3}
+        df["_p"] = df["Action"].map(_priority)
+        df = df.sort_values(["_p", "Weight_Delta"]).drop(columns=["_p"])
+
+        if actionable_only:
+            return df[df["Action"] != "HOLD"].copy()
+        return df
 
     def _resolve_action(
         self, current_w: float, target_w: float, delta: float
@@ -227,39 +230,35 @@ def load_weights(tickers: List[str], weights_file: Optional[str] = None) -> Dict
 
 
 def print_orders(orders: pd.DataFrame) -> None:
-    """Print execution orders as a formatted terminal table."""
-    if orders.empty:
-        print("\n" + "=" * 60)
-        print("  TSMOM EXECUTION ENGINE — No actionable orders today")
-        print("=" * 60)
-        return
+    """
+    Print the full portfolio position table.
 
-    sells     = orders[orders["Action"] == "SELL"]
-    buys      = orders[orders["Action"] == "BUY"]
-    rebalance = orders[orders["Action"] == "REBALANCE"]
+    Expects the full (unfiltered) DataFrame from calculate_orders(actionable_only=False).
+    Sorted: SELL → BUY → REBALANCE → HOLD.
+    """
+    n_sell      = (orders["Action"] == "SELL").sum()
+    n_buy       = (orders["Action"] == "BUY").sum()
+    n_rebalance = (orders["Action"] == "REBALANCE").sum()
+    n_hold      = (orders["Action"] == "HOLD").sum()
 
-    def _fmt_section(title: str, df: pd.DataFrame) -> None:
-        if df.empty:
-            return
-        print(f"\n{'=' * 60}")
-        print(f"  {title}  ({len(df)} trade{'s' if len(df) != 1 else ''})")
-        print("=" * 60)
-        print(f"  {'Ticker':<8} {'Curr%':>7} {'Tgt%':>7} {'Delta%':>8}  Action")
-        print("  " + "-" * 46)
-        for ticker, row in df.iterrows():
-            curr  = f"{row['Current_Weight']*100:.2f}"
-            tgt   = f"{row['Target_Weight']*100:.2f}"
-            delta = f"{row['Weight_Delta']*100:+.2f}"
-            print(f"  {ticker:<8} {curr:>7} {tgt:>7} {delta:>8}  {row['Action']}")
-
-    print(f"\n{'=' * 60}")
+    print(f"\n{'=' * 66}")
     print(f"  TSMOM EXECUTION ENGINE — {pd.Timestamp.today().date()}")
-    print(f"  {len(orders)} actionable order{'s' if len(orders) != 1 else ''}")
-    print("=" * 60)
+    print(f"  {len(orders)} tickers  |  "
+          f"{n_sell} SELL  {n_buy} BUY  {n_rebalance} REBALANCE  {n_hold} HOLD")
+    print("=" * 66)
+    print(f"  {'Ticker':<8} {'Curr%':>7} {'Tgt%':>7} {'Delta%':>8}  Action")
+    print("  " + "-" * 52)
 
-    _fmt_section("LIQUIDATIONS  (Exit — trend broken)", sells)
-    _fmt_section("NEW ENTRIES   (Initiate position)",   buys)
-    _fmt_section("REBALANCE     (Drift > 5%)",          rebalance)
+    for ticker, row in orders.iterrows():
+        curr  = f"{row['Current_Weight']*100:.2f}"
+        tgt   = f"{row['Target_Weight']*100:.2f}"
+        delta = f"{row['Weight_Delta']*100:+.2f}"
+        action = row["Action"]
+        marker = "  "
+        if action == "SELL":      marker = "✖ "
+        elif action == "BUY":     marker = "✚ "
+        elif action == "REBALANCE": marker = "↕ "
+        print(f"{marker}{ticker:<8} {curr:>7} {tgt:>7} {delta:>8}  {action}")
 
     print()
 
@@ -310,7 +309,7 @@ def main() -> None:
 
     eng = TSMOMExecutionEngine()
     try:
-        orders = eng.calculate_orders(prices, current_weights)
+        orders = eng.calculate_orders(prices, current_weights, actionable_only=False)
     except ValueError as exc:
         sys.exit(f"[ERROR] {exc}")
 
