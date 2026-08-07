@@ -131,9 +131,7 @@ class TSMOMExecutionEngine:
 
         df = pd.DataFrame(records).set_index("Ticker")
 
-        _priority = {"HOLD": 0, "REBALANCE": 1, "BUY": 2, "SELL": 3}
-        df["_p"] = df["Action"].map(_priority)
-        df = df.sort_values(["_p", "Weight_Delta"]).drop(columns=["_p"])
+        df = df.sort_values("Target_Weight", ascending=False)
 
         if actionable_only:
             return df[df["Action"] != "HOLD"].copy()
