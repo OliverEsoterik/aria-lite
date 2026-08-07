@@ -21,7 +21,7 @@ import sys
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine, text
-from typing import Dict, List, Literal
+from typing import Dict, List, Literal, Optional
 
 
 # --- Configuration (matches existing ETL scripts) ---
@@ -194,3 +194,33 @@ def fetch_portfolio_prices(engine, tickers: List[str], lookback_days: int = 300)
         print(f"[WARN] No price data found for: {missing}", file=sys.stderr)
 
     return prices
+
+
+def load_weights(tickers: List[str], weights_file: Optional[str] = None) -> Dict[str, float]:
+    """
+    Build current_weights dict.
+
+    If weights_file is None: equal-weight across all tickers (1/N).
+    If weights_file is given: parse JSON {"TICKER": float, ...}.
+        Tickers in the file but not in tickers list are ignored.
+        Tickers in tickers list but not in the file default to 0.0.
+
+    Raises SystemExit on file not found or invalid JSON.
+    """
+    if weights_file is None:
+        n = len(tickers)
+        if n == 0:
+            return {}
+        w = 1.0 / n
+        return {t: w for t in tickers}
+
+    if not os.path.exists(weights_file):
+        sys.exit(f"[ERROR] Weights file not found: {weights_file}")
+
+    try:
+        with open(weights_file) as f:
+            raw = json.load(f)
+    except json.JSONDecodeError as exc:
+        sys.exit(f"[ERROR] Invalid JSON in weights file: {exc}")
+
+    return {t: float(raw.get(t, 0.0)) for t in tickers}

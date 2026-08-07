@@ -2,6 +2,7 @@ import pytest
 import pandas as pd
 import numpy as np
 import sys, os
+import tempfile, json as _json, os as _os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'etl'))
 
 from importlib import import_module
@@ -135,3 +136,36 @@ def test_fetch_portfolio_prices_pivots_correctly():
     assert result.index.name == 'date'
     assert result.columns.name == 'ticker'
     assert isinstance(result.index, pd.DatetimeIndex)
+
+
+def test_load_weights_equal_default():
+    from importlib import import_module
+    mod = import_module('04_tsmom_execution_engine')
+    tickers = ['A', 'B', 'C', 'D']
+    w = mod.load_weights(tickers)
+    assert len(w) == 4
+    assert all(abs(v - 0.25) < 1e-12 for v in w.values())
+
+
+def test_load_weights_from_file():
+    from importlib import import_module
+    mod = import_module('04_tsmom_execution_engine')
+    tickers = ['NVDA', 'MSFT', 'AAPL']
+    data = {'NVDA': 0.10, 'MSFT': 0.08}  # AAPL absent → 0.0
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        _json.dump(data, f)
+        fname = f.name
+    try:
+        w = mod.load_weights(tickers, fname)
+        assert abs(w['NVDA'] - 0.10) < 1e-12
+        assert abs(w['MSFT'] - 0.08) < 1e-12
+        assert abs(w['AAPL'] - 0.0) < 1e-12
+    finally:
+        _os.unlink(fname)
+
+
+def test_load_weights_file_not_found_exits():
+    from importlib import import_module
+    mod = import_module('04_tsmom_execution_engine')
+    with pytest.raises(SystemExit):
+        mod.load_weights(['X'], '/tmp/this_does_not_exist_xyzzy.json')
