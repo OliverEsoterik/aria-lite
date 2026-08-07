@@ -103,3 +103,34 @@ def test_equal_weight_default_is_one_over_n():
     eng = TSMOMExecutionEngine()
     assert abs(eng.target_annual_volatility - 0.15) < 1e-12
     assert abs(eng.min_rebalance_threshold - 0.05) < 1e-12
+
+
+def test_fetch_portfolio_prices_pivots_correctly():
+    """fetch_portfolio_prices should pivot raw SQL rows into date x ticker DataFrame."""
+    from unittest.mock import MagicMock, patch
+    from importlib import import_module
+
+    mod = import_module('04_tsmom_execution_engine')
+    fetch = mod.fetch_portfolio_prices
+
+    fake_raw = pd.DataFrame({
+        'date': pd.to_datetime(['2024-01-02', '2024-01-02', '2024-01-03', '2024-01-03']),
+        'ticker': ['AAPL', 'MSFT', 'AAPL', 'MSFT'],
+        'adj_close': [185.0, 375.0, 187.0, 378.0],
+    })
+
+    mock_conn = MagicMock()
+    mock_engine = MagicMock()
+    mock_engine.connect.return_value.__enter__ = MagicMock(return_value=mock_conn)
+    mock_engine.connect.return_value.__exit__ = MagicMock(return_value=False)
+
+    with patch('pandas.read_sql', return_value=fake_raw):
+        result = fetch(mock_engine, ['AAPL', 'MSFT'])
+
+    assert result.shape == (2, 2)
+    assert 'AAPL' in result.columns
+    assert 'MSFT' in result.columns
+    assert result.loc['2024-01-03', 'MSFT'] == 378.0
+    assert result.loc['2024-01-02', 'AAPL'] == 185.0
+    assert result.index.name == 'date'
+    assert result.columns.name == 'ticker'

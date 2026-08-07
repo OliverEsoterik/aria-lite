@@ -21,7 +21,7 @@ import sys
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine, text
-from typing import Dict, Literal
+from typing import Dict, List, Literal
 
 
 # --- Configuration (matches existing ETL scripts) ---
@@ -147,3 +147,48 @@ class TSMOMExecutionEngine:
             return "REBALANCE"
         else:
             return "HOLD"
+
+
+def fetch_portfolio_prices(engine, tickers: List[str], lookback_days: int = 300) -> pd.DataFrame:
+    """
+    Fetch adjusted close prices for a list of tickers from the DB.
+
+    Uses price_adjusted where available, falls back to price_close.
+    Returns a DatetimeIndex x ticker DataFrame sorted oldest-first.
+    Tickers with no rows are dropped from the result.
+    """
+    if not tickers:
+        return pd.DataFrame()
+
+    query = text("""
+        SELECT
+            DATE(timestamp)                                    AS date,
+            ticker,
+            CASE
+                WHEN price_adjusted IS NOT NULL AND price_adjusted > 0
+                    THEN price_adjusted::double precision
+                ELSE price_close::double precision
+            END AS adj_close
+        FROM market_prices
+        WHERE ticker = ANY(:tickers)
+          AND timestamp >= NOW() - (:days * INTERVAL '1 day')
+        ORDER BY ticker, date ASC
+    """)
+
+    with engine.connect() as conn:
+        raw = pd.read_sql(query, conn, params={"tickers": tickers, "days": lookback_days})
+
+    if raw.empty:
+        return pd.DataFrame()
+
+    prices = (
+        raw.pivot(index="date", columns="ticker", values="adj_close")
+        .sort_index()
+    )
+    prices.index = pd.to_datetime(prices.index)
+
+    missing = [t for t in tickers if t not in prices.columns]
+    if missing:
+        print(f"[WARN] No price data found for: {missing}", file=sys.stderr)
+
+    return prices
