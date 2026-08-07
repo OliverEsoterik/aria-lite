@@ -1,4 +1,4 @@
-.PHONY: setup start-db stop-db stop status migrate run ratings clean
+.PHONY: setup start-db stop-db stop status migrate run ratings tsmom tsmom-weights clean
 
 setup: start-db migrate
 	./scripts/run_etl.sh
@@ -58,6 +58,14 @@ statistics: start-db
 ratings: start-db
 	@echo "Generating production ratings..."
 	cd src/etl && python3 03_generate_production_ratings.py
+
+tsmom: start-db
+	@echo "Running TSMOM Execution Engine..."
+	cd src/etl && python3 04_tsmom_execution_engine.py
+
+tsmom-weights: start-db
+	@echo "Running TSMOM Execution Engine with weights file..."
+	cd src/etl && python3 04_tsmom_execution_engine.py --weights-file ../../$(WEIGHTS_FILE)
 
 clean: stop-db
 	rm -rf $(DB_PATH)
