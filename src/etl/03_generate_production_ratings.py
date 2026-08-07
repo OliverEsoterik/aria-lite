@@ -66,6 +66,7 @@ def get_extensive_fundamentals(ticker):
 
         return {
             'ticker': ticker,
+            'sector': info.get('sector', 'N/A'),
             'current_price': info.get('currentPrice', 0),
             'peg': round(peg, 3) if peg else 99.0,
             'fcf_yield': round(fcf_yield, 4), # Represented as decimal (0.05 = 5%)
@@ -291,7 +292,7 @@ if __name__ == "__main__":
         pd.set_option('display.width', 1000)
         
         display_cols = [
-            'ticker', 'rating', 'final_score', 'eps_rev', 'mom_score', 'peg', 'fwd_pe', 'rev_growth', 'op_margin', 'near_high', 'current_ratio', 'debt_to_equity', 'roe', 'profit_margin', 'fcf_yield'
+            'ticker', 'sector', 'rating', 'final_score', 'eps_rev', 'mom_score', 'peg', 'fwd_pe', 'rev_growth', 'op_margin', 'near_high', 'current_ratio', 'debt_to_equity', 'roe', 'profit_margin', 'fcf_yield'
         ]
 
         print("\n" + "="*50)

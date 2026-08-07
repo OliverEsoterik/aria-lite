@@ -1,7 +1,9 @@
 .PHONY: setup start-db stop-db stop status migrate run ratings tsmom tsmom-weights clean
 
+SEC_USER_AGENT_EMAIL ?= your.email@address.com
+
 setup: start-db migrate
-	./scripts/run_etl.sh
+	SEC_USER_AGENT_EMAIL=$(SEC_USER_AGENT_EMAIL) ./scripts/run_etl.sh
 
 start-db:
 	@if [ ! -d "$(DB_PATH)" ]; then \
