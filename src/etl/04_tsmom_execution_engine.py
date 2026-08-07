@@ -131,7 +131,7 @@ class TSMOMExecutionEngine:
 
         df = pd.DataFrame(records).set_index("Ticker")
 
-        _priority = {"SELL": 0, "BUY": 1, "REBALANCE": 2, "HOLD": 3}
+        _priority = {"HOLD": 0, "REBALANCE": 1, "BUY": 2, "SELL": 3}
         df["_p"] = df["Action"].map(_priority)
         df = df.sort_values(["_p", "Weight_Delta"]).drop(columns=["_p"])
 
