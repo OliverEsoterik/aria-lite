@@ -71,22 +71,11 @@ def test_target_weights_sum_to_one_when_any_trend_active():
         index=dates,
     )
     orders_full = eng.calculate_orders(prices, {})
-    # Compute target weights for ALL tickers (including HOLDs)
-    # Re-run privately to check normalisation
-    prices2 = prices.ffill().bfill()
-    latest = prices2.iloc[-1]
-    sma_210 = prices2.rolling(210).mean().iloc[-1]
-    r_252 = (latest / prices2.iloc[-252]) - 1.0
-    trend = pd.Series({t: int((latest[t] > sma_210[t]) and (r_252[t] > 0)) for t in prices2.columns})
-    log_r = np.log(prices2 / prices2.shift(1))
-    ewma_std = log_r.ewm(span=60).std().iloc[-1]
-    ann_vol = (ewma_std * np.sqrt(252)).replace(0, np.nan)
-    raw_w = (0.15 / ann_vol) * trend
-    raw_w = raw_w.fillna(0.0)
-    total = raw_w.sum()
-    if total > 0:
-        normalised = raw_w / total
-        assert abs(normalised.sum() - 1.0) < 1e-9
+    # Both tickers are in uptrend — expect BUY orders with Target_Weight summing to 1.0
+    assert not orders_full.empty, "Expected BUY orders for monotonically rising prices"
+    assert abs(orders_full["Target_Weight"].sum() - 1.0) < 1e-9, (
+        f"Target weights sum to {orders_full['Target_Weight'].sum()}, expected 1.0"
+    )
 
 
 def test_zero_trend_produces_no_buys():
@@ -107,9 +96,10 @@ def test_zero_trend_produces_no_buys():
 
 
 def test_equal_weight_default_is_one_over_n():
-    """Helper: equal-weight dict for N tickers must be 1/N each."""
-    # This tests the helper used in main(), not the engine itself
-    tickers = ['A', 'B', 'C', 'D']
-    n = len(tickers)
-    weights = {t: 1.0 / n for t in tickers}
-    assert all(abs(w - 0.25) < 1e-12 for w in weights.values())
+    """Engine initialised with defaults has correct target vol (15%) and threshold (5%)."""
+    from importlib import import_module
+    mod = import_module('04_tsmom_execution_engine')
+    TSMOMExecutionEngine = mod.TSMOMExecutionEngine
+    eng = TSMOMExecutionEngine()
+    assert abs(eng.target_annual_volatility - 0.15) < 1e-12
+    assert abs(eng.min_rebalance_threshold - 0.05) < 1e-12
