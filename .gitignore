@@ -5,6 +5,15 @@
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
+src/etl/__pycache__/
+src/etl/aria_lite.egg-info/
+src/aria_lite.egg-info/
 
 # Agent related
 .pi/
+.superpowers/
+docs/
+skills/
+work/
+.pi-loop.json.lock
