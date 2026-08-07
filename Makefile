@@ -64,6 +64,7 @@ tsmom: start-db
 	cd src/etl && python3 04_tsmom_execution_engine.py
 
 tsmom-weights: start-db
+	@test -n "$(WEIGHTS_FILE)" || (echo "[ERROR] Usage: make tsmom-weights WEIGHTS_FILE=path/to/weights.json" && exit 1)
 	@echo "Running TSMOM Execution Engine with weights file..."
 	cd src/etl && python3 04_tsmom_execution_engine.py --weights-file ../../$(WEIGHTS_FILE)
 

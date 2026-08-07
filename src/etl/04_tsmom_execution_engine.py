@@ -149,7 +149,7 @@ class TSMOMExecutionEngine:
             return "HOLD"
 
 
-def fetch_portfolio_prices(engine, tickers: List[str], lookback_days: int = 300) -> pd.DataFrame:
+def fetch_portfolio_prices(engine, tickers: List[str], lookback_days: int = 400) -> pd.DataFrame:
     """
     Fetch adjusted close prices for a list of tickers from the DB.
 
@@ -282,10 +282,13 @@ def main() -> None:
 
     print(f"[INFO] Fetching price history for {len(tickers)} tickers...")
     db_engine = create_engine(DB_URL, pool_size=5, max_overflow=10)
-    prices = fetch_portfolio_prices(db_engine, tickers, lookback_days=310)
+    prices = fetch_portfolio_prices(db_engine, tickers, lookback_days=400)
 
     if prices.empty:
         sys.exit("[ERROR] No price data returned from DB. Is the database running?")
+
+    # Load weights BEFORE filtering so we can detect held-but-dropped tickers
+    all_tickers_weights = load_weights(list(prices.columns), args.weights_file)
 
     # Drop tickers with insufficient data (< 252 rows after pivot)
     valid_tickers = [t for t in prices.columns if prices[t].notna().sum() >= 252]
@@ -296,6 +299,12 @@ def main() -> None:
 
     if prices.empty:
         sys.exit("[ERROR] No tickers have sufficient price history (252 days required).")
+
+    # Warn about held-but-dropped tickers
+    for ticker in dropped:
+        w = all_tickers_weights.get(ticker, 0.0)
+        if w > 0.0:
+            print(f"[WARN] {ticker}: held (weight={w:.4f}) but insufficient price history — no SELL generated", file=sys.stderr)
 
     current_weights = load_weights(valid_tickers, args.weights_file)
 
