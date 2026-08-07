@@ -224,3 +224,89 @@ def load_weights(tickers: List[str], weights_file: Optional[str] = None) -> Dict
         sys.exit(f"[ERROR] Invalid JSON in weights file: {exc}")
 
     return {t: float(raw.get(t, 0.0)) for t in tickers}
+
+
+def print_orders(orders: pd.DataFrame) -> None:
+    """Print execution orders as a formatted terminal table."""
+    if orders.empty:
+        print("\n" + "=" * 60)
+        print("  TSMOM EXECUTION ENGINE — No actionable orders today")
+        print("=" * 60)
+        return
+
+    sells     = orders[orders["Action"] == "SELL"]
+    buys      = orders[orders["Action"] == "BUY"]
+    rebalance = orders[orders["Action"] == "REBALANCE"]
+
+    def _fmt_section(title: str, df: pd.DataFrame) -> None:
+        if df.empty:
+            return
+        print(f"\n{'=' * 60}")
+        print(f"  {title}  ({len(df)} trade{'s' if len(df) != 1 else ''})")
+        print("=" * 60)
+        print(f"  {'Ticker':<8} {'Curr%':>7} {'Tgt%':>7} {'Delta%':>8}  Action")
+        print("  " + "-" * 46)
+        for ticker, row in df.iterrows():
+            curr  = f"{row['Current_Weight']*100:.2f}"
+            tgt   = f"{row['Target_Weight']*100:.2f}"
+            delta = f"{row['Weight_Delta']*100:+.2f}"
+            print(f"  {ticker:<8} {curr:>7} {tgt:>7} {delta:>8}  {row['Action']}")
+
+    print(f"\n{'=' * 60}")
+    print(f"  TSMOM EXECUTION ENGINE — {pd.Timestamp.today().date()}")
+    print(f"  {len(orders)} actionable order{'s' if len(orders) != 1 else ''}")
+    print("=" * 60)
+
+    _fmt_section("LIQUIDATIONS  (Exit — trend broken)", sells)
+    _fmt_section("NEW ENTRIES   (Initiate position)",   buys)
+    _fmt_section("REBALANCE     (Drift > 5%)",          rebalance)
+
+    print()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="TSMOM Execution Engine — print daily execution orders for CURRENT_PORTFOLIO"
+    )
+    parser.add_argument(
+        "--weights-file",
+        metavar="PATH",
+        default=None,
+        help="JSON file mapping ticker→current decimal weight. "
+             "Omit to use equal-weight across all portfolio tickers.",
+    )
+    args = parser.parse_args()
+
+    # Deduplicate portfolio tickers (CURRENT_PORTFOLIO has duplicates)
+    tickers = list(dict.fromkeys(CURRENT_PORTFOLIO))
+
+    print(f"[INFO] Fetching price history for {len(tickers)} tickers...")
+    db_engine = create_engine(DB_URL, pool_size=5, max_overflow=10)
+    prices = fetch_portfolio_prices(db_engine, tickers, lookback_days=310)
+
+    if prices.empty:
+        sys.exit("[ERROR] No price data returned from DB. Is the database running?")
+
+    # Drop tickers with insufficient data (< 252 rows after pivot)
+    valid_tickers = [t for t in prices.columns if prices[t].notna().sum() >= 252]
+    dropped = [t for t in prices.columns if t not in valid_tickers]
+    if dropped:
+        print(f"[WARN] Dropping {len(dropped)} ticker(s) with < 252 days: {dropped}", file=sys.stderr)
+    prices = prices[valid_tickers]
+
+    if prices.empty:
+        sys.exit("[ERROR] No tickers have sufficient price history (252 days required).")
+
+    current_weights = load_weights(valid_tickers, args.weights_file)
+
+    eng = TSMOMExecutionEngine()
+    try:
+        orders = eng.calculate_orders(prices, current_weights)
+    except ValueError as exc:
+        sys.exit(f"[ERROR] {exc}")
+
+    print_orders(orders)
+
+
+if __name__ == "__main__":
+    main()
