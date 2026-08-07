@@ -44,6 +44,8 @@ We use a `Makefile` to orchestrate local development tasks cleanly. Once inside 
 * `make setup`: **(First-time only)** Initializes the database cluster, installs the TimescaleDB extension, applies SQL schema (`sql/01_init_schema.sql`), and executes the full ETL pipeline including entity population (`scripts/run_etl.sh`).
 * `make run`: The standard command to run your daily scripts. It ensures the database is running in the background and executes the ETL pipeline.
 * `make ratings`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
+* `make tsmom`: Runs the TSMOM Execution Engine against your current portfolio, printing a full position table with recommended actions.
+* `make tsmom-weights WEIGHTS_FILE=path/to/weights.json`: Same as above, but reads your actual position weights from a JSON file (`{"NVDA": 0.08, "MSFT": 0.05, ...}`) instead of assuming equal weight.
 * `make status`: Checks the current state of the local PostgreSQL database, including its connection port and host path.
 * `make start-db`: Starts the local PostgreSQL database in the background.
 * `make stop`: Gracefully shuts down the background PostgreSQL database (alias for `make stop-db`).
@@ -73,6 +75,27 @@ Upon running `nix develop`, the environment automatically sets up the following 
 
 ### ETL Scripts
 Python scripts (`src/etl/01_fetch_price_data.py`, `src/etl/02_compute_statistics.py`, `src/etl/03_generate_production_ratings.py`) execute using the dependencies pinned in the Nix environment. Database connections intelligently read from the environment variables, meaning no hardcoded credentials are used.
+
+### TSMOM Execution Engine (`src/etl/04_tsmom_execution_engine.py`)
+
+A standalone portfolio execution overlay based on **Time Series Momentum** (Moskowitz, Ooi & Pedersen 2012) and **volatility targeting** (Hurst, Ooi & Pedersen 2017). Run via `make tsmom`.
+
+For each ticker in `CURRENT_PORTFOLIO` it computes a price-only trend signal and a volatility-adjusted target weight, then compares against your current holdings to produce one of four actions:
+
+| Action | When it fires |
+|---|---|
+| **HOLD** | Ticker is in trend, your position is within 5% of the volatility-targeted weight — no action needed |
+| **REBALANCE** | Ticker is in trend, but your current weight drifts more than 5% from target — trim or add |
+| **BUY** | Ticker enters trend and you have **no position** (weight = 0) — initiate |
+| **SELL** | Trend breaks and you currently hold the position — exit |
+
+> **Note:** `BUY` only fires when you pass real position weights via `--weights-file` and a ticker has weight `0`. With the default equal-weight mode every ticker is treated as held, so only `SELL`, `REBALANCE`, and `HOLD` appear.
+
+**Trend signal (price-only):** `T_i = 1` if `Price > SMA_210` AND `12-month return > 0`, else `0`.
+
+**Volatility-targeted weight:** `W_i = (15% target vol / EWMA_60 vol_i) × T_i`, normalised so weights sum to 100%.
+
+**Deadband threshold:** 5% — positions within ±5% of target are left unchanged to cap turnover.
 
 ---
 
