@@ -182,7 +182,9 @@ def fetch_portfolio_prices(engine, tickers: List[str], lookback_days: int = 300)
         return pd.DataFrame()
 
     prices = (
-        raw.pivot(index="date", columns="ticker", values="adj_close")
+        raw.groupby(["date", "ticker"])["adj_close"]
+        .last()
+        .unstack("ticker")
         .sort_index()
     )
     prices.index = pd.to_datetime(prices.index)

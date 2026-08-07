@@ -134,3 +134,4 @@ def test_fetch_portfolio_prices_pivots_correctly():
     assert result.loc['2024-01-02', 'AAPL'] == 185.0
     assert result.index.name == 'date'
     assert result.columns.name == 'ticker'
+    assert isinstance(result.index, pd.DatetimeIndex)
