@@ -11,7 +11,7 @@ recently rolled over (short-term windows negative) even if the 12-month
 return remains positive.
 
 Output columns:
-  Ticker | Trend | Votes | R_21% | R_63% | R_252% | Score_21 | Score_63 | Score_252 | Composite | SMA_Ratio
+  Ticker | Trend | Votes | Grade | R_21% | R_63% | R_252% | Score_21 | Score_63 | Score_252 | Composite | SMA_Ratio
 
   Composite = (Score_21 + Score_63 + Score_252) / 3  (the primary sort key)
   Votes     = how many of the three windows show positive returns (0-3)
@@ -88,6 +88,35 @@ def fetch_prices(engine, tickers: List[str]) -> pd.DataFrame:
     return prices
 
 
+def _grade(votes: int, composite: float) -> str:
+    """Momentum letter grade (A-C with +/-, F) based on votes and composite."""
+    if pd.isna(composite):
+        return "F"
+    if votes == 3:
+        if composite > 3.0:
+            return "A+"
+        elif composite > 1.0:
+            return "A"
+        else:
+            return "A-"
+    elif votes == 2:
+        if composite > 2.0:
+            return "B+"
+        elif composite > 0.5:
+            return "B"
+        else:
+            return "B-"
+    elif votes == 1:
+        if composite > 1.0:
+            return "C+"
+        elif composite > 0.0:
+            return "C"
+        else:
+            return "C-"
+    else:
+        return "F"
+
+
 def compute_momentum_scores(prices: pd.DataFrame) -> pd.DataFrame:
     """
     Compute per-ticker TSMOM metrics across three windows (Hurst et al. 2017).
@@ -96,6 +125,7 @@ def compute_momentum_scores(prices: pd.DataFrame) -> pd.DataFrame:
         DataFrame indexed by Ticker with columns:
             Trend          — 1 if Composite_Score > 0, else 0 (for backward compat)
             Votes          — count of windows with positive returns (0-3)
+            Grade          — momentum letter grade (A+ to F)
             R_21_pct       — raw 21-day return, %
             R_63_pct       — raw 63-day return, %
             R_252_pct      — raw 252-day return, %
@@ -148,6 +178,7 @@ def compute_momentum_scores(prices: pd.DataFrame) -> pd.DataFrame:
             "Ticker": ticker,
             "Trend": trend,
             "Votes": votes,
+            "Grade": _grade(votes, composite),
             "R_21_pct": round(raw_returns["R_21"] * 100, 2),
             "R_63_pct": round(raw_returns["R_63"] * 100, 2),
             "R_252_pct": round(raw_returns["R_252"] * 100, 2),
@@ -173,23 +204,24 @@ def print_rankings(df: pd.DataFrame, show_all: bool, top_n: int) -> None:
     n_pos = (df["Composite_Score"] > 0).sum()
     n_neg = (df["Composite_Score"] <= 0).sum()
 
-    print(f"\n{'=' * 120}")
+    print(f"\n{'=' * 128}")
     print(f"  TSMOM MULTI-WINDOW RANKINGS — {pd.Timestamp.today().date()}  "
           f"(Hurst, Ooi & Pedersen 2017)")
     print(f"  {len(df)} tickers total  |  {n_pos} Composite>0  {n_neg} Composite<=0")
     if not show_all:
         print(f"  Showing Composite>0 only (pass --all to include all tickers)")
-    print("=" * 120)
-    header = (f"  {'#':<4} {'Ticker':<8} {'Trend':>6} {'Votes':>6}"
+    print("=" * 128)
+    header = (f"  {'#':<4} {'Ticker':<8} {'Trend':>6} {'Votes':>6} {'Grade':>6}"
               f" {'R_21%':>8} {'R_63%':>8} {'R_252%':>8}"
               f" {'S_21':>7} {'S_63':>7} {'S_252':>7}"
               f" {'Composite':>10} {'SMA Rat':>8}")
     print(header)
-    print("  " + "-" * 105)
+    print("  " + "-" * 112)
 
     for rank, (ticker, row) in enumerate(subset.iterrows(), start=1):
         trend_marker = "✔" if row["Trend"] == 1 else "✖"
         votes = int(row["Votes"])
+        grade = str(row["Grade"])
         r21  = f"{row['R_21_pct']:+.1f}"   if not pd.isna(row["R_21_pct"]) else "   n/a"
         r63  = f"{row['R_63_pct']:+.1f}"   if not pd.isna(row["R_63_pct"]) else "   n/a"
         r252 = f"{row['R_252_pct']:+.1f}"  if not pd.isna(row["R_252_pct"]) else "   n/a"
@@ -199,7 +231,7 @@ def print_rankings(df: pd.DataFrame, show_all: bool, top_n: int) -> None:
         comp = f"{row['Composite_Score']:+.3f}" if not pd.isna(row["Composite_Score"]) else "   n/a"
         smar = f"{row['SMA_Ratio']:.4f}"   if not pd.isna(row["SMA_Ratio"]) else "   n/a"
 
-        print(f"  {rank:<4} {ticker:<8} {trend_marker:>6} {votes:>6}"
+        print(f"  {rank:<4} {ticker:<8} {trend_marker:>6} {votes:>6} {grade:>6}"
               f" {r21:>8} {r63:>8} {r252:>8}"
               f" {s21:>7} {s63:>7} {s252:>7}"
               f" {comp:>10} {smar:>8}")
