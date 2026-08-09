@@ -93,11 +93,26 @@ def _grade(votes: int, composite: float) -> str:
     if pd.isna(composite):
         return "F"
     if votes == 3:
-        return "A"
+        if composite > 3.0:
+            return "A+"
+        elif composite > 1.0:
+            return "A"
+        else:
+            return "A-"
     elif votes == 2:
-        return "B"
+        if composite > 2.0:
+            return "B+"
+        elif composite > 0.5:
+            return "B"
+        else:
+            return "B-"
     elif votes == 1:
-        return "C"
+        if composite > 1.0:
+            return "C+"
+        elif composite > 0.0:
+            return "C"
+        else:
+            return "D"
     else:
         return "F"
 

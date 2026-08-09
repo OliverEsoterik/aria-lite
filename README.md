@@ -115,7 +115,7 @@ Instead of a single 252-day window, the ranker averages the volatility-scaled re
 | **R_21% / R_63% / R_252%** | Raw returns over 1-month, 3-month, and 12-month windows |
 | **S_21 / S_63 / S_252** | Volatility-scaled score at each horizon (R / σ, the ex-ante Sharpe proxy) |
 | **Composite** | Average of S_21, S_63, S_252 — **primary sort key** (Hurst et al. 2017 equal-weighted composite) |
-| **Grade** | Momentum letter grade (A to F) — A = all 3 windows positive, B = 2 of 3, C = 1 of 3, F = none |
+| **Grade** | Momentum letter grade (A+ to F) — based on Votes + Composite tiers |
 | **SMA Rat** | Current price ÷ 210-day SMA — trend steepness proxy |
 
 ```bash
