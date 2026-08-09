@@ -144,8 +144,7 @@ def compute_momentum_scores(prices: pd.DataFrame) -> pd.DataFrame:
     sma_210 = prices.rolling(window=210).mean().iloc[-1]
     latest = prices.iloc[-1]
 
-    # Pre-compute prices at each lookback (replace zero to prevent inf returns)
-    price_at = {name: prices.iloc[-window].replace(0, np.nan) for name, window in WINDOWS.items()}
+    n_obs = len(prices)
 
     records = []
     for ticker in prices.columns:
@@ -156,8 +155,18 @@ def compute_momentum_scores(prices: pd.DataFrame) -> pd.DataFrame:
         votes = 0
 
         for name, window in WINDOWS.items():
+            # Skip if not enough data for this window
+            if n_obs < window:
+                raw_returns[name] = np.nan
+                scores[name] = np.nan
+                continue
+            p_back = float(prices.iloc[-window][ticker])
+            if p_back <= 0 or np.isnan(p_back):
+                raw_returns[name] = np.nan
+                scores[name] = np.nan
+                continue
             # Raw return for this window
-            r = float((latest[ticker] / price_at[name][ticker]) - 1.0)
+            r = float((latest[ticker] / p_back) - 1.0)
             raw_returns[name] = r
 
             # Vol-scaled score
@@ -268,15 +277,14 @@ def main() -> None:
     if prices.empty:
         sys.exit("[ERROR] No price data returned. Is the database running?")
 
-    valid = [t for t in prices.columns if prices[t].notna().sum() >= TSMOM_WINDOW]
+    # Require at least the shortest window worth of data (21d)
+    min_rows = min(WINDOWS.values())
+    valid = [t for t in prices.columns if prices[t].notna().sum() >= min_rows]
     dropped = [t for t in prices.columns if t not in valid]
     if dropped:
-        print(f"[WARN] Dropping {len(dropped)} ticker(s) with < {TSMOM_WINDOW} days: {dropped}",
+        print(f"[WARN] Dropping {len(dropped)} ticker(s) with < {min_rows} days: {dropped}",
               file=sys.stderr)
     prices = prices[valid]
-
-    if prices.empty:
-        sys.exit("[ERROR] No tickers have sufficient price history.")
 
     scores = compute_momentum_scores(prices)
     print_rankings(scores, show_all=args.show_all, top_n=args.top)
