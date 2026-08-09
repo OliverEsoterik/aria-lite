@@ -46,6 +46,9 @@ We use a `Makefile` to orchestrate local development tasks cleanly. Once inside 
 * `make ratings`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
 * `make tsmom`: Runs the TSMOM Execution Engine against your current portfolio, printing a full position table with recommended actions.
 * `make tsmom-weights WEIGHTS_FILE=path/to/weights.json`: Same as above, but reads your actual position weights from a JSON file (`{"NVDA": 0.08, "MSFT": 0.05, ...}`) instead of assuming equal weight.
+* `make tsmom-rank`: Ranks all TSMOM-ON tickers by momentum strength (volatility-scaled 12-month return).
+* `make tsmom-rank-all`: Includes off-trend tickers in the ranking (useful for spotting tickers near flipping on).
+* `make tsmom-rank-top N=10`: Show only the top N tickers.
 * `make status`: Checks the current state of the local PostgreSQL database, including its connection port and host path.
 * `make start-db`: Starts the local PostgreSQL database in the background.
 * `make stop`: Gracefully shuts down the background PostgreSQL database (alias for `make stop-db`).
@@ -96,6 +99,38 @@ For each ticker in `CURRENT_PORTFOLIO` it computes a price-only trend signal and
 **Volatility-targeted weight:** `W_i = (15% target vol / EWMA_60 vol_i) × T_i`, normalised so weights sum to 100%.
 
 **Deadband threshold:** 5% — positions within ±5% of target are left unchanged to cap turnover.
+
+---
+
+### TSMOM Momentum Ranker (`src/etl/05_tsmom_momentum_ranker.py`)
+
+Ranks the same portfolio by continuous momentum strength — the natural extension of the binary TSMOM signal. Run via `make tsmom-rank`.
+
+For each ticker it computes the full suite of TSMOM metrics and sorts by **Score** = R_252 / σ (the ex-ante Sharpe proxy from Moskowitz et al. 2012 — return per unit of risk, the same quantity used for position sizing in script 04).
+
+| Column | What it means |
+|---|---|
+| **Trend** | 1 = the TSMOM gate is open (P > SMA_210 AND R_252 > 0), 0 = closed |
+| **R_252%** | Raw 12-month return |
+| **Vol%** | Annualised EWMA volatility (60-day span) |
+| **Score** | R_252 / σ — momentum strength per unit of risk (primary sort key) |
+| **SMA Ratio** | Current price ÷ 210-day SMA — trend steepness proxy |
+
+```bash
+# Rank tickers with active TSMOM signal (default)
+make tsmom-rank
+
+# Include off-trend tickers
+make tsmom-rank-all
+
+# Top 5 only (respects --all flag when running tsmom-rank-all)
+make tsmom-rank-top N=5
+make tsmom-rank-top N=5 ARGS="--all"
+
+# Pass any extra args: --top, --all, or both
+make tsmom-rank ARGS="--top 10"
+make tsmom-rank ARGS="--all --top 10"
+```
 
 ---
 
