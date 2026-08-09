@@ -1,21 +1,25 @@
 """
-TSMOM Momentum Ranker
+TSMOM Momentum Ranker — Multi-Window Composite (Hurst, Ooi & Pedersen, 2017)
 
-Ranks all portfolio tickers by Time Series Momentum strength
-(Moskowitz, Ooi & Pedersen, 2012).
+Ranks portfolio tickers by the equal-weighted combination of 1-month,
+3-month, and 12-month volatility-scaled momentum signals.
 
-The paper defines the TSMOM signal as sign(r_{t-12,t}).  Position size
-is scaled by ex-ante volatility so the effective momentum "score" per
-unit of risk is r_{12m} / σ — the annualised past-return Sharpe proxy.
-That is the primary sort key here.
+Hurst et al. (2017) extend Moskowitz et al. (2012) across 137 years of
+data and show that combining signals across multiple horizons produces
+more robust trend detection.  The composite catches stocks that have
+recently rolled over (short-term windows negative) even if the 12-month
+return remains positive.
 
-Outputs a ranked table of:
-  Ticker | Trend | R_252 (%) | Ann.Vol (%) | Score (R/σ) | SMA Ratio
+Output columns:
+  Ticker | Trend | Votes | R_21% | R_63% | R_252% | Score_21 | Score_63 | Score_252 | Composite | SMA_Ratio
+
+  Composite = (Score_21 + Score_63 + Score_252) / 3  (the primary sort key)
+  Votes     = how many of the three windows show positive returns (0-3)
 
 Usage:
     python 05_tsmom_momentum_ranker.py
     python 05_tsmom_momentum_ranker.py --top 10
-    python 05_tsmom_momentum_ranker.py --all          # include TSMOM-off tickers
+    python 05_tsmom_momentum_ranker.py --all          # include tickers with no positive windows
 """
 
 import argparse
@@ -39,6 +43,13 @@ CURRENT_PORTFOLIO = _mod_03.CURRENT_PORTFOLIO
 SMA_WINDOW = 210
 TSMOM_WINDOW = 252
 VOL_WINDOW = 60
+
+# Multi-window lookbacks per Hurst et al. (2017)
+WINDOWS = {
+    "R_21": 21,    # 1-month
+    "R_63": 63,    # 3-month
+    "R_252": 252,  # 12-month
+}
 
 
 def fetch_prices(engine, tickers: List[str]) -> pd.DataFrame:
@@ -79,85 +90,132 @@ def fetch_prices(engine, tickers: List[str]) -> pd.DataFrame:
 
 def compute_momentum_scores(prices: pd.DataFrame) -> pd.DataFrame:
     """
-    Compute per-ticker TSMOM metrics.
+    Compute per-ticker TSMOM metrics across three windows (Hurst et al. 2017).
 
-    Columns returned:
-        Trend      — 1 if P > SMA_210 and R_252 > 0, else 0  (Moskowitz signal gate)
-        R_252_pct  — raw 12-month return, %
-        Vol_pct    — annualised EWMA volatility, %
-        Score      — R_252 / σ  (volatility-scaled momentum, the ex-ante Sharpe proxy)
-        SMA_Ratio  — latest price / SMA_210  (trend strength proxy)
+    Returns:
+        DataFrame indexed by Ticker with columns:
+            Trend          — 1 if Composite_Score > 0, else 0 (for backward compat)
+            Votes          — count of windows with positive returns (0-3)
+            R_21_pct       — raw 21-day return, %
+            R_63_pct       — raw 63-day return, %
+            R_252_pct      — raw 252-day return, %
+            Score_21       — R_21 / σ_21 (vol-scaled 1-month momentum)
+            Score_63       — R_63 / σ_63 (vol-scaled 3-month momentum)
+            Score_252      — R_252 / σ_252 (vol-scaled 12-month momentum)
+            Composite_Score— average of all three scores (primary sort key)
+            SMA_Ratio      — latest price / SMA_210 (trend steepness proxy)
     """
     prices = prices.ffill().bfill()
 
-    latest = prices.iloc[-1]
-    sma_210 = prices.rolling(window=SMA_WINDOW).mean().iloc[-1]
-    r_252 = (latest / prices.iloc[-TSMOM_WINDOW]) - 1.0
-
     log_returns = np.log(prices / prices.shift(1))
-    ewma_std = log_returns.ewm(span=VOL_WINDOW).std().iloc[-1]
+    ewma_std = log_returns.ewm(span=60).std().iloc[-1]
     ann_vol = (ewma_std * np.sqrt(252)).replace(0, np.nan)
+
+    sma_210 = prices.rolling(window=210).mean().iloc[-1]
+    latest = prices.iloc[-1]
+
+    # Pre-compute prices at each lookback
+    price_at = {name: prices.iloc[-window] for name, window in WINDOWS.items()}
 
     records = []
     for ticker in prices.columns:
-        r = float(r_252[ticker])
         v = float(ann_vol[ticker]) if not np.isnan(ann_vol[ticker]) else np.nan
-        trend = int((latest[ticker] > sma_210[ticker]) and (r > 0))
-        score = r / v if (v and not np.isnan(v)) else np.nan
+
+        scores = {}
+        raw_returns = {}
+        votes = 0
+
+        for name, window in WINDOWS.items():
+            # Raw return for this window
+            r = float((latest[ticker] / price_at[name][ticker]) - 1.0)
+            raw_returns[name] = r
+
+            # Vol-scaled score
+            score = r / v if (v and not np.isnan(v) and v > 0) else np.nan
+            scores[name] = score
+
+            if not np.isnan(r) and r > 0:
+                votes += 1
+
+        # Composite: average of available vol-scaled scores
+        valid_scores = [s for s in scores.values() if not np.isnan(s)]
+        composite = np.mean(valid_scores) if valid_scores else np.nan
+
+        trend = int(not np.isnan(composite) and composite > 0)
         sma_ratio = float(latest[ticker] / sma_210[ticker]) if sma_210[ticker] > 0 else np.nan
 
-        records.append(
-            {
-                "Ticker": ticker,
-                "Trend": trend,
-                "R_252_pct": round(r * 100, 2),
-                "Vol_pct": round(v * 100, 2) if not np.isnan(v) else np.nan,
-                "Score": round(score, 3) if not np.isnan(score) else np.nan,
-                "SMA_Ratio": round(sma_ratio, 4) if not np.isnan(sma_ratio) else np.nan,
-            }
-        )
+        records.append({
+            "Ticker": ticker,
+            "Trend": trend,
+            "Votes": votes,
+            "R_21_pct": round(raw_returns["R_21"] * 100, 2),
+            "R_63_pct": round(raw_returns["R_63"] * 100, 2),
+            "R_252_pct": round(raw_returns["R_252"] * 100, 2),
+            "Score_21": round(scores["R_21"], 3) if not np.isnan(scores["R_21"]) else np.nan,
+            "Score_63": round(scores["R_63"], 3) if not np.isnan(scores["R_63"]) else np.nan,
+            "Score_252": round(scores["R_252"], 3) if not np.isnan(scores["R_252"]) else np.nan,
+            "Composite_Score": round(composite, 3) if not np.isnan(composite) else np.nan,
+            "SMA_Ratio": round(sma_ratio, 4) if not np.isnan(sma_ratio) else np.nan,
+        })
 
     df = pd.DataFrame(records).set_index("Ticker")
-    df = df.sort_values("Score", ascending=False, na_position="last")
+    df = df.sort_values("Composite_Score", ascending=False, na_position="last")
     return df
 
 
 def print_rankings(df: pd.DataFrame, show_all: bool, top_n: int) -> None:
-    subset = df if show_all else df[df["Trend"] == 1]
+    """Print ranked table sorted by Composite_Score."""
+    # Default filter: show tickers with Composite_Score > 0
+    subset = df if show_all else df[df["Composite_Score"] > 0]
     if top_n:
         subset = subset.head(top_n)
 
-    n_on  = (df["Trend"] == 1).sum()
-    n_off = (df["Trend"] == 0).sum()
+    n_pos = (df["Composite_Score"] > 0).sum()
+    n_neg = (df["Composite_Score"] <= 0).sum()
 
-    print(f"\n{'=' * 72}")
-    print(f"  TSMOM MOMENTUM RANKINGS — {pd.Timestamp.today().date()}")
-    print(f"  {len(df)} tickers total  |  {n_on} TSMOM-ON  {n_off} TSMOM-OFF")
+    print(f"\n{'=' * 120}")
+    print(f"  TSMOM MULTI-WINDOW RANKINGS — {pd.Timestamp.today().date()}  "
+          f"(Hurst, Ooi & Pedersen 2017)")
+    print(f"  {len(df)} tickers total  |  {n_pos} Composite>0  {n_neg} Composite<=0")
     if not show_all:
-        print(f"  Showing TSMOM-ON only (pass --all to include off-trend tickers)")
-    print("=" * 72)
-    print(f"  {'#':<4} {'Ticker':<8} {'Trend':>6} {'R_252%':>8} {'Vol%':>7} {'Score':>7}  {'SMA Ratio':>9}")
-    print("  " + "-" * 60)
+        print(f"  Showing Composite>0 only (pass --all to include all tickers)")
+    print("=" * 120)
+    header = (f"  {'#':<4} {'Ticker':<8} {'Trend':>6} {'Votes':>6}"
+              f" {'R_21%':>8} {'R_63%':>8} {'R_252%':>8}"
+              f" {'S_21':>7} {'S_63':>7} {'S_252':>7}"
+              f" {'Composite':>10} {'SMA Rat':>8}")
+    print(header)
+    print("  " + "-" * 105)
 
     for rank, (ticker, row) in enumerate(subset.iterrows(), start=1):
         trend_marker = "✔" if row["Trend"] == 1 else "✖"
-        r     = f"{row['R_252_pct']:+.1f}" if not pd.isna(row["R_252_pct"]) else "  n/a"
-        v     = f"{row['Vol_pct']:.1f}"    if not pd.isna(row["Vol_pct"])   else "  n/a"
-        score = f"{row['Score']:+.3f}"     if not pd.isna(row["Score"])     else "   n/a"
-        smar  = f"{row['SMA_Ratio']:.4f}"  if not pd.isna(row["SMA_Ratio"]) else "   n/a"
-        print(f"  {rank:<4} {ticker:<8} {trend_marker:>6} {r:>8} {v:>7} {score:>7}  {smar:>9}")
+        votes = int(row["Votes"])
+        r21  = f"{row['R_21_pct']:+.1f}"   if not pd.isna(row["R_21_pct"]) else "   n/a"
+        r63  = f"{row['R_63_pct']:+.1f}"   if not pd.isna(row["R_63_pct"]) else "   n/a"
+        r252 = f"{row['R_252_pct']:+.1f}"  if not pd.isna(row["R_252_pct"]) else "   n/a"
+        s21  = f"{row['Score_21']:+.3f}"   if not pd.isna(row["Score_21"]) else "   n/a"
+        s63  = f"{row['Score_63']:+.3f}"   if not pd.isna(row["Score_63"]) else "   n/a"
+        s252 = f"{row['Score_252']:+.3f}"  if not pd.isna(row["Score_252"]) else "   n/a"
+        comp = f"{row['Composite_Score']:+.3f}" if not pd.isna(row["Composite_Score"]) else "   n/a"
+        smar = f"{row['SMA_Ratio']:.4f}"   if not pd.isna(row["SMA_Ratio"]) else "   n/a"
+
+        print(f"  {rank:<4} {ticker:<8} {trend_marker:>6} {votes:>6}"
+              f" {r21:>8} {r63:>8} {r252:>8}"
+              f" {s21:>7} {s63:>7} {s252:>7}"
+              f" {comp:>10} {smar:>8}")
 
     print()
     if not subset.empty:
         top = subset.index[0]
-        print(f"  ★  Strongest momentum: {top}  "
-              f"(Score={subset.loc[top,'Score']:+.3f}, "
-              f"R_252={subset.loc[top,'R_252_pct']:+.1f}%)\n")
+        print(f"  ★  Strongest: {top}  "
+              f"Composite={subset.loc[top,'Composite_Score']:+.3f}, "
+              f"Votes={int(subset.loc[top,'Votes'])}, "
+              f"R_252={subset.loc[top,'R_252_pct']:+.1f}%\n")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Rank portfolio tickers by TSMOM momentum strength"
+        description="Rank portfolio tickers by multi-window TSMOM composite (Hurst et al. 2017)"
     )
     parser.add_argument(
         "--top", type=int, default=0, metavar="N",
