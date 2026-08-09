@@ -46,7 +46,7 @@ We use a `Makefile` to orchestrate local development tasks cleanly. Once inside 
 * `make ratings`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
 * `make tsmom`: Runs the TSMOM Execution Engine against your current portfolio, printing a full position table with recommended actions.
 * `make tsmom-weights WEIGHTS_FILE=path/to/weights.json`: Same as above, but reads your actual position weights from a JSON file (`{"NVDA": 0.08, "MSFT": 0.05, ...}`) instead of assuming equal weight.
-* `make tsmom-rank`: Ranks all TSMOM-ON tickers by momentum strength (volatility-scaled 12-month return).
+* `make tsmom-rank`: Ranks tickers by multi-window TSMOM composite (Composite > 0, Hurst et al. 2017).
 * `make tsmom-rank-all`: Includes off-trend tickers in the ranking (useful for spotting tickers near flipping on).
 * `make tsmom-rank-top N=10`: Show only the top N tickers.
 * `make status`: Checks the current state of the local PostgreSQL database, including its connection port and host path.

@@ -114,8 +114,8 @@ def compute_momentum_scores(prices: pd.DataFrame) -> pd.DataFrame:
     sma_210 = prices.rolling(window=210).mean().iloc[-1]
     latest = prices.iloc[-1]
 
-    # Pre-compute prices at each lookback
-    price_at = {name: prices.iloc[-window] for name, window in WINDOWS.items()}
+    # Pre-compute prices at each lookback (replace zero to prevent inf returns)
+    price_at = {name: prices.iloc[-window].replace(0, np.nan) for name, window in WINDOWS.items()}
 
     records = []
     for ticker in prices.columns:
