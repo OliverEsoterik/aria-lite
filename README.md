@@ -46,6 +46,9 @@ We use a `Makefile` to orchestrate local development tasks cleanly. Once inside 
 * `make ratings`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
 * `make tsmom`: Runs the TSMOM Execution Engine against your current portfolio, printing a full position table with recommended actions.
 * `make tsmom-weights WEIGHTS_FILE=path/to/weights.json`: Same as above, but reads your actual position weights from a JSON file (`{"NVDA": 0.08, "MSFT": 0.05, ...}`) instead of assuming equal weight.
+* `make tsmom-rank`: Ranks tickers by multi-window TSMOM composite (Composite > 0, Hurst et al. 2017).
+* `make tsmom-rank-all`: Includes off-trend tickers in the ranking (useful for spotting tickers near flipping on).
+* `make tsmom-rank-top N=10`: Show only the top N tickers.
 * `make status`: Checks the current state of the local PostgreSQL database, including its connection port and host path.
 * `make start-db`: Starts the local PostgreSQL database in the background.
 * `make stop`: Gracefully shuts down the background PostgreSQL database (alias for `make stop-db`).
@@ -96,6 +99,40 @@ For each ticker in `CURRENT_PORTFOLIO` it computes a price-only trend signal and
 **Volatility-targeted weight:** `W_i = (15% target vol / EWMA_60 vol_i) × T_i`, normalised so weights sum to 100%.
 
 **Deadband threshold:** 5% — positions within ±5% of target are left unchanged to cap turnover.
+
+---
+
+### TSMOM Momentum Ranker (`src/etl/05_tsmom_momentum_ranker.py`)
+
+Ranks the same portfolio by multi-window momentum composite per **Hurst, Ooi & Pedersen (2017)**. Run via `make tsmom-rank`.
+
+Instead of a single 252-day window, the ranker averages the volatility-scaled return across three windows (21d, 63d, 252d) — exactly the equal-weighted combination described in the paper. This catches stocks that have recently rolled over (short-term windows go negative) even if the 12-month return is still positive.
+
+| Column | What it means |
+|---|---|
+| **Trend** | 1 if Composite_Score > 0 |
+| **Votes** | How many of the three windows (21d, 63d, 252d) show positive returns (0–3) |
+| **R_21% / R_63% / R_252%** | Raw returns over 1-month, 3-month, and 12-month windows |
+| **S_21 / S_63 / S_252** | Volatility-scaled score at each horizon (R / σ, the ex-ante Sharpe proxy) |
+| **Grade** | Momentum letter grade (A+/A/A-/B+/B/B-/C+/C/C-/F) based on Votes + Composite tiers |
+| **Composite** | Average of S_21, S_63, S_252 — **primary sort key** (Hurst et al. 2017 equal-weighted composite) |
+| **SMA Rat** | Current price ÷ 210-day SMA — trend steepness proxy |
+
+```bash
+# Rank tickers with active TSMOM signal (default)
+make tsmom-rank
+
+# Include off-trend tickers
+make tsmom-rank-all
+
+# Top 5 only (respects --all flag when running tsmom-rank-all)
+make tsmom-rank-top N=5
+make tsmom-rank-top N=5 ARGS="--all"
+
+# Pass any extra args: --top, --all, or both
+make tsmom-rank ARGS="--top 10"
+make tsmom-rank ARGS="--all --top 10"
+```
 
 ---
 

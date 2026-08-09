@@ -70,5 +70,18 @@ tsmom-weights: start-db
 	@echo "Running TSMOM Execution Engine with weights file..."
 	cd src/etl && python3 04_tsmom_execution_engine.py --weights-file ../../$(WEIGHTS_FILE)
 
+tsmom-rank: start-db
+	@echo "Ranking portfolio by TSMOM momentum strength..."
+	cd src/etl && python3 05_tsmom_momentum_ranker.py $(ARGS)
+
+tsmom-rank-all: start-db
+	@echo "Ranking ALL portfolio tickers by TSMOM momentum (including off-trend)..."
+	cd src/etl && python3 05_tsmom_momentum_ranker.py --all $(ARGS)
+
+tsmom-rank-top: start-db
+	@test -n "$(N)" || (echo "[ERROR] Usage: make tsmom-rank-top N=10" && exit 1)
+	@echo "Showing top $(N) by TSMOM momentum..."
+	cd src/etl && python3 05_tsmom_momentum_ranker.py --top $(N) $(ARGS)
+
 clean: stop-db
 	rm -rf $(DB_PATH)
