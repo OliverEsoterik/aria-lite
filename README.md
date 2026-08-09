@@ -106,7 +106,7 @@ For each ticker in `CURRENT_PORTFOLIO` it computes a price-only trend signal and
 
 Ranks the same portfolio by multi-window momentum composite per **Hurst, Ooi & Pedersen (2017)**. Run via `make tsmom-rank`.
 
-Instead of a single 252-day window, the ranker averages the volatility-scaled 12-month return across three windows (21d, 63d, 252d) — exactly the equal-weighted combination described the paper. This catches stocks that have recently rolled over (short-term windows go negative) even if the 12-month return is still positive.
+Instead of a single 252-day window, the ranker averages the volatility-scaled return across three windows (21d, 63d, 252d) — exactly the equal-weighted combination described in the paper. This catches stocks that have recently rolled over (short-term windows go negative) even if the 12-month return is still positive.
 
 | Column | What it means |
 |---|---|

@@ -99,9 +99,9 @@ def compute_momentum_scores(prices: pd.DataFrame) -> pd.DataFrame:
             R_21_pct       — raw 21-day return, %
             R_63_pct       — raw 63-day return, %
             R_252_pct      — raw 252-day return, %
-            Score_21       — R_21 / σ_21 (vol-scaled 1-month momentum)
-            Score_63       — R_63 / σ_63 (vol-scaled 3-month momentum)
-            Score_252      — R_252 / σ_252 (vol-scaled 12-month momentum)
+            Score_21       — R_21 / σ (vol-scaled 1-month momentum, σ = EWMA-60 ann. vol)
+            Score_63       — R_63 / σ (vol-scaled 3-month momentum, shared σ)
+            Score_252      — R_252 / σ (vol-scaled 12-month momentum, shared σ)
             Composite_Score— average of all three scores (primary sort key)
             SMA_Ratio      — latest price / SMA_210 (trend steepness proxy)
     """
