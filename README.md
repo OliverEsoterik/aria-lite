@@ -104,17 +104,18 @@ For each ticker in `CURRENT_PORTFOLIO` it computes a price-only trend signal and
 
 ### TSMOM Momentum Ranker (`src/etl/05_tsmom_momentum_ranker.py`)
 
-Ranks the same portfolio by continuous momentum strength — the natural extension of the binary TSMOM signal. Run via `make tsmom-rank`.
+Ranks the same portfolio by multi-window momentum composite per **Hurst, Ooi & Pedersen (2017)**. Run via `make tsmom-rank`.
 
-For each ticker it computes the full suite of TSMOM metrics and sorts by **Score** = R_252 / σ (the ex-ante Sharpe proxy from Moskowitz et al. 2012 — return per unit of risk, the same quantity used for position sizing in script 04).
+Instead of a single 252-day window, the ranker averages the volatility-scaled 12-month return across three windows (21d, 63d, 252d) — exactly the equal-weighted combination described the paper. This catches stocks that have recently rolled over (short-term windows go negative) even if the 12-month return is still positive.
 
 | Column | What it means |
 |---|---|
-| **Trend** | 1 = the TSMOM gate is open (P > SMA_210 AND R_252 > 0), 0 = closed |
-| **R_252%** | Raw 12-month return |
-| **Vol%** | Annualised EWMA volatility (60-day span) |
-| **Score** | R_252 / σ — momentum strength per unit of risk (primary sort key) |
-| **SMA Ratio** | Current price ÷ 210-day SMA — trend steepness proxy |
+| **Trend** | 1 if Composite_Score > 0 |
+| **Votes** | How many of the three windows (21d, 63d, 252d) show positive returns (0–3) |
+| **R_21% / R_63% / R_252%** | Raw returns over 1-month, 3-month, and 12-month windows |
+| **S_21 / S_63 / S_252** | Volatility-scaled score at each horizon (R / σ, the ex-ante Sharpe proxy) |
+| **Composite** | Average of S_21, S_63, S_252 — **primary sort key** (Hurst et al. 2017 equal-weighted composite) |
+| **SMA Rat** | Current price ÷ 210-day SMA — trend steepness proxy |
 
 ```bash
 # Rank tickers with active TSMOM signal (default)
