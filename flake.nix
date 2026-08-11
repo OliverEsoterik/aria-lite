@@ -24,6 +24,8 @@
         pandas-ta
         numpy
         requests
+        hmmlearn
+        scikit-learn
       ]);
     in {
       devShells.${system}.default = pkgs.mkShell {

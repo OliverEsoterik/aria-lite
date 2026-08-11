@@ -1,4 +1,4 @@
-"""Predict market regimes using a trained HMM model."""
+"""Predict current market regime from a trained HMM."""
 
 
 def main() -> None:

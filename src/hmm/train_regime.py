@@ -1,4 +1,4 @@
-"""Train a Hidden Markov Model to detect market regimes."""
+"""Train a 3-state Gaussian HMM on SPY returns + VIX to detect market regimes."""
 
 
 def main() -> None:

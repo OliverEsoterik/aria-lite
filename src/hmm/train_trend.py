@@ -1,4 +1,4 @@
-"""Train a Hidden Markov Model to detect trend states."""
+"""Train per-ticker 3-state HMMs for trend quality assessment."""
 
 
 def main() -> None:
