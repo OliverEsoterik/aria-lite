@@ -3,7 +3,7 @@ Train per-ticker 3-state HMMs for trend quality assessment.
 
 Usage:
     python src/hmm/train_trend.py NVDA
-    python src/hmm/train_trend.py --tickers NVDA AMD MU
+    python src/hmm/train_trend.py NVDA AMD MU
     python src/hmm/train_trend.py --all
 """
 
@@ -12,10 +12,9 @@ import pickle
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 import numpy as np
-import pandas as pd
 import yfinance as yf
 from hmmlearn import hmm
 
@@ -52,10 +51,10 @@ def fetch_returns(ticker: str, years: int = 5) -> np.ndarray:
 
 
 def _label_trend_states(model: hmm.GaussianHMM) -> list[str]:
-    """Label states as STRONG_UPTREND, WEAK_UPTREND, SIDEWAYS, etc.
+    """Label states by mean return.
 
     Sorts states by their mean return (ascending).
-    For 3 states: lowest = DOWNTREND/SIDEWAYS, highest = STRONG_UPTREND, middle = WEAK_UPTREND.
+    For 3 states: lowest = DOWNTREND, highest = STRONG_UPTREND, middle = WEAK_UPTREND.
     """
     means = model.means_[:, 0]
     sorted_idx = np.argsort(means)
