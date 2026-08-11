@@ -50,7 +50,7 @@ def fetch_recent_data(lookback_days: int = 60) -> np.ndarray:
         Array of shape (lookback_days, 2) with [log_return, vix_close].
     """
     end = datetime.now()
-    start = end.replace(days=max(0, lookback_days * 2))  # buffer for alignment
+    start = end - __import__("datetime").timedelta(days=max(1, lookback_days * 2))
 
     spy = yf.download("SPY", start=start, end=end, progress=False)
     vix = yf.download("VIX", start=start, end=end, progress=False)
