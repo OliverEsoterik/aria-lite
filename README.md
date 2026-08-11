@@ -196,3 +196,42 @@ in {
 
 **Note:** This setup requires that your system's PostgreSQL has the `timescaledb` extension enabled and a database named `alphapicks` created.
 
+---
+
+## HMM Regime Detector & Trend Quality
+
+Standalone advisory tools using Hidden Markov Models — no changes to the existing trading system.
+
+### Market Regime Detection
+
+Detects Bull/Bear/Sideways regimes from SPY returns and VIX levels.
+
+```bash
+# Train (one-time, or re-run to retrain)
+python src/hmm/train_regime.py
+
+# Predict (daily)
+python src/hmm/predict_regime.py
+```
+
+### Per-Ticker Trend Quality
+
+Assesses trend quality for individual stocks using per-ticker HMMs.
+
+```bash
+# Train per-ticker models
+python src/hmm/train_trend.py NVDA AMD MU
+python src/hmm/train_trend.py --all
+
+# Predict trend quality
+python src/hmm/predict_trend.py NVDA
+python src/hmm/predict_trend.py NVDA AMD MU --compare
+python src/hmm/predict_trend.py --all
+```
+
+### Dependencies
+
+- `hmmlearn` — HMM implementation (Baum-Welch, Forward, Viterbi)
+- `scikit-learn` — feature standardization
+- `yfinance` — market and stock data
+
