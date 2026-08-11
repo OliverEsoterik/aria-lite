@@ -8,7 +8,8 @@ Usage:
 
 import argparse
 import pickle
-from datetime import datetime
+import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -50,7 +51,7 @@ def fetch_recent_data(lookback_days: int = 60) -> np.ndarray:
         Array of shape (lookback_days, 2) with [log_return, vix_close].
     """
     end = datetime.now()
-    start = end - __import__("datetime").timedelta(days=max(1, lookback_days * 2))
+    start = end - timedelta(days=max(1, lookback_days * 2))
 
     spy = yf.download("SPY", start=start, end=end, progress=False)
     vix = yf.download("VIX", start=start, end=end, progress=False)
@@ -196,8 +197,8 @@ def main() -> None:
         )
         print_report(result)
     except (FileNotFoundError, ValueError) as e:
-        print(f"[ERROR] {e}", file=__import__("sys").stderr)
-        __import__("sys").exit(1)
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -19,13 +19,7 @@ import yfinance as yf
 from hmmlearn import hmm
 
 
-# When --all is used, which tickers to train on
-CURRENT_PORTFOLIO = [
-    "MU", "GOOG", "CLS", "GOOGL", "AGX", "LQDA", "VICR", "SIMO", "AAMI",
-    "DELL", "TER", "STRL", "CRDO", "CIEN", "LITE", "AMKR", "KALU", "BE",
-    "CLSK", "IREN", "SNDK", "TE", "TSM", "ESLT", "LRCX", "APH", "AVGO",
-    "AMD", "STX", "WDC", "FSLR", "MRVL", "NU", "NVDA",
-]
+from src.hmm.portfolio import CURRENT_PORTFOLIO
 
 
 def fetch_returns(ticker: str, years: int = 5) -> np.ndarray:
