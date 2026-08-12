@@ -55,7 +55,7 @@ def fetch_recent_data(lookback_days: int = 60) -> np.ndarray:
     start = end - timedelta(days=max(1, lookback_days * 2))
 
     spy = yf.download("SPY", start=start, end=end, progress=False)
-    vix = yf.download("VIX", start=start, end=end, progress=False)
+    vix = yf.download("^VIX", start=start, end=end, progress=False)
 
     if spy.empty or vix.empty:
         raise ValueError("Failed to fetch recent SPY or VIX data")
@@ -70,6 +70,30 @@ def fetch_recent_data(lookback_days: int = 60) -> np.ndarray:
     # Take the most recent `lookback_days` days
     recent = df.tail(lookback_days)
     return recent[["spy_return", "vix_close"]].values
+
+
+def _regularize_transmat(transmat: np.ndarray, max_self: float = 0.99) -> np.ndarray:
+    """Regularize transition matrix so no state is perfectly absorbing.
+
+    Baum-Welch can converge to boundary solutions where a state's
+    self-transition probability is exactly 1.0 (absorbing state).
+    This makes matrix_power produce degenerate forecasts. Clip
+    diagonals to a maximum and redistribute excess to off-diagonals.
+    """
+    t = transmat.copy()
+    for i in range(len(t)):
+        if t[i, i] > max_self:
+            excess = t[i, i] - max_self
+            t[i, i] = max_self
+            off_idx = [j for j in range(len(t)) if j != i]
+            off_sum = sum(t[i, j] for j in off_idx)
+            if off_sum > 0:
+                for j in off_idx:
+                    t[i, j] += excess * t[i, j] / off_sum
+            else:
+                for j in off_idx:
+                    t[i, j] = excess / (len(t) - 1)
+    return t
 
 
 def compute_forecast(
@@ -91,16 +115,12 @@ def compute_forecast(
     """
     if horizons is None:
         horizons = [30, 60, 90]
-
-    transmat = model.transmat_
+    transmat = _regularize_transmat(model.transmat_)
     forecast = {}
     for step in horizons:
-        # A^step
         power = np.linalg.matrix_power(transmat, step)
-        # P(t+N) = P(t) @ A^N
         future = current_probs @ power
         forecast[step] = [round(float(p), 4) for p in future]
-
     return forecast
 
 

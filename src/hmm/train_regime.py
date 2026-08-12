@@ -30,7 +30,7 @@ def fetch_training_data(years: int = 10) -> np.ndarray:
     start = end.replace(year=end.year - years)
 
     spy = yf.download("SPY", start=start, end=end, progress=False)
-    vix = yf.download("VIX", start=start, end=end, progress=False)
+    vix = yf.download("^VIX", start=start, end=end, progress=False)
 
     if spy.empty or vix.empty:
         raise ValueError("Failed to fetch SPY or VIX data from yfinance")

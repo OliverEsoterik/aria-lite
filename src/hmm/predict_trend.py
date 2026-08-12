@@ -63,15 +63,45 @@ def fetch_recent_returns(ticker: str, lookback_days: int = 252) -> np.ndarray:
     return recent.values
 
 
+def _regularize_transmat(transmat: np.ndarray, max_self: float = 0.99) -> np.ndarray:
+    """Regularize transition matrix so no state is perfectly absorbing.
+
+    Baum-Welch can converge to boundary solutions where a state's
+    self-transition probability is exactly 1.0 (absorbing state).
+    This makes matrix_power produce degenerate forecasts. Clip
+    diagonals to a maximum and redistribute excess to off-diagonals.
+    """
+    t = transmat.copy()
+    for i in range(len(t)):
+        if t[i, i] > max_self:
+            excess = t[i, i] - max_self
+            t[i, i] = max_self
+            # Distribute excess proportionally to off-diagonals
+            off_idx = [j for j in range(len(t)) if j != i]
+            off_sum = sum(t[i, j] for j in off_idx)
+            if off_sum > 0:
+                for j in off_idx:
+                    t[i, j] += excess * t[i, j] / off_sum
+            else:
+                # Uniform spread if no off-diagonals exist
+                for j in off_idx:
+                    t[i, j] = excess / (len(t) - 1)
+    return t
+
+
 def compute_forecast(
     model: "hmm.GaussianHMM",
     current_probs: np.ndarray,
     horizons: list[int] = None,
 ) -> dict[int, list[float]]:
-    """Compute N-step-ahead state distribution using the transition matrix."""
+    """Compute N-step-ahead state distribution using the transition matrix.
+
+    The transition matrix is regularized before forecasting to prevent
+    degenerate results from absorbing states.
+    """
     if horizons is None:
         horizons = [30, 60, 90]
-    transmat = model.transmat_
+    transmat = _regularize_transmat(model.transmat_)
     forecast = {}
     for step in horizons:
         power = np.linalg.matrix_power(transmat, step)
@@ -147,10 +177,11 @@ def predict_trend(
     # Forecast
     forecast = compute_forecast(model, current_probs, [30, 60, 90])
 
-    # Quality grade
+    # Quality grade: state strength + confidence
+    # Forecast is excluded because transition matrices can have
+    # near-1.0 self-transitions, producing degenerate forecasts.
     state_score = _STATE_SCORES.get(state_label, 0.33)
-    forecast_60d = forecast.get(60, [0.25] * 4)[current_state_idx]
-    grade_score = state_score * 0.40 + confidence * 0.30 + forecast_60d * 0.30
+    grade_score = state_score * 0.50 + confidence * 0.50
     grade = compute_quality_grade(grade_score)
 
     # Current return values (last row)
