@@ -26,6 +26,7 @@
         requests
         hmmlearn
         scikit-learn
+        pytest
       ]);
     in {
       devShells.${system}.default = pkgs.mkShell {
