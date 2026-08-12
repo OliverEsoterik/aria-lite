@@ -1,4 +1,6 @@
-.PHONY: setup start-db stop-db stop status migrate run ratings tsmom tsmom-weights clean
+.PHONY: setup start-db stop-db stop status migrate run ratings tsmom tsmom-weights clean \
+	hmm-train-regime hmm-predict-regime hmm-train-trend hmm-train-trend-all \
+	hmm-predict-trend hmm-predict-trend-all
 
 SEC_USER_AGENT_EMAIL ?= your.email@address.com
 
@@ -82,6 +84,40 @@ tsmom-rank-top: start-db
 	@test -n "$(N)" || (echo "[ERROR] Usage: make tsmom-rank-top N=10" && exit 1)
 	@echo "Showing top $(N) by TSMOM momentum..."
 	cd src/etl && python3 05_tsmom_momentum_ranker.py --top $(N) $(ARGS)
+
+# ──────────────────────────────────────────────
+# HMM — Regime Detector & Trend Quality
+# ──────────────────────────────────────────────
+# These do NOT depend on a database — they use yfinance directly.
+# Run from the project root inside `nix develop`.
+
+HMM_DATA_DIR     ?= data
+HMM_REGIME_PARAMS ?= $(HMM_DATA_DIR)/hmm_regime_params.pkl
+HMM_TREND_DIR    ?= $(HMM_DATA_DIR)/hmm_trend_params
+
+hmm-train-regime:
+	@mkdir -p $(HMM_DATA_DIR)
+	PYTHONPATH=. python3 src/hmm/train_regime.py --save-path $(HMM_REGIME_PARAMS)
+
+hmm-predict-regime:
+	@test -f $(HMM_REGIME_PARAMS) || (echo "[ERROR] No trained model at $(HMM_REGIME_PARAMS). Run 'make hmm-train-regime' first." && exit 1)
+	PYTHONPATH=. python3 src/hmm/predict_regime.py --params-path $(HMM_REGIME_PARAMS)
+
+hmm-train-trend:
+	@test -n "$(TICKERS)" || (echo "[ERROR] Usage: make hmm-train-trend TICKERS=\"NVDA AMD\"" && exit 1)
+	@mkdir -p $(HMM_TREND_DIR)
+	PYTHONPATH=. python3 src/hmm/train_trend.py --save-dir $(HMM_TREND_DIR) $(TICKERS)
+
+hmm-train-trend-all:
+	@mkdir -p $(HMM_TREND_DIR)
+	PYTHONPATH=. python3 src/hmm/train_trend.py --all --save-dir $(HMM_TREND_DIR)
+
+hmm-predict-trend:
+	@test -n "$(TICKERS)" || (echo "[ERROR] Usage: make hmm-predict-trend TICKERS=\"NVDA AMD\" [COMPARE=1]" && exit 1)
+	PYTHONPATH=. python3 src/hmm/predict_trend.py --params-dir $(HMM_TREND_DIR) $(if $(COMPARE),--compare,) $(TICKERS)
+
+hmm-predict-trend-all:
+	PYTHONPATH=. python3 src/hmm/predict_trend.py --all --params-dir $(HMM_TREND_DIR) $(if $(COMPARE),--compare,)
 
 clean: stop-db
 	rm -rf $(DB_PATH)
