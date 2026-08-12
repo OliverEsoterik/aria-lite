@@ -97,27 +97,27 @@ HMM_TREND_DIR    ?= $(HMM_DATA_DIR)/hmm_trend_params
 
 hmm-train-regime:
 	@mkdir -p $(HMM_DATA_DIR)
-	PYTHONPATH=. python3 src/hmm/train_regime.py --save-path $(HMM_REGIME_PARAMS)
+	python3 src/hmm/train_regime.py --save-path $(HMM_REGIME_PARAMS)
 
 hmm-predict-regime:
 	@test -f $(HMM_REGIME_PARAMS) || (echo "[ERROR] No trained model at $(HMM_REGIME_PARAMS). Run 'make hmm-train-regime' first." && exit 1)
-	PYTHONPATH=. python3 src/hmm/predict_regime.py --params-path $(HMM_REGIME_PARAMS)
+	python3 src/hmm/predict_regime.py --params-path $(HMM_REGIME_PARAMS)
 
 hmm-train-trend:
 	@test -n "$(TICKERS)" || (echo "[ERROR] Usage: make hmm-train-trend TICKERS=\"NVDA AMD\"" && exit 1)
 	@mkdir -p $(HMM_TREND_DIR)
-	PYTHONPATH=. python3 src/hmm/train_trend.py --save-dir $(HMM_TREND_DIR) $(TICKERS)
+	python3 src/hmm/train_trend.py --save-dir $(HMM_TREND_DIR) $(TICKERS)
 
 hmm-train-trend-all:
 	@mkdir -p $(HMM_TREND_DIR)
-	PYTHONPATH=. python3 src/hmm/train_trend.py --all --save-dir $(HMM_TREND_DIR)
+	python3 src/hmm/train_trend.py --all --save-dir $(HMM_TREND_DIR)
 
 hmm-predict-trend:
 	@test -n "$(TICKERS)" || (echo "[ERROR] Usage: make hmm-predict-trend TICKERS=\"NVDA AMD\" [COMPARE=1]" && exit 1)
-	PYTHONPATH=. python3 src/hmm/predict_trend.py --params-dir $(HMM_TREND_DIR) $(if $(COMPARE),--compare,) $(TICKERS)
+	python3 src/hmm/predict_trend.py --params-dir $(HMM_TREND_DIR) $(if $(COMPARE),--compare,) $(TICKERS)
 
 hmm-predict-trend-all:
-	PYTHONPATH=. python3 src/hmm/predict_trend.py --all --params-dir $(HMM_TREND_DIR) $(if $(COMPARE),--compare,)
+	python3 src/hmm/predict_trend.py --all --params-dir $(HMM_TREND_DIR) $(if $(COMPARE),--compare,)
 
 clean: stop-db
 	rm -rf $(DB_PATH)

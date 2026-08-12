@@ -57,10 +57,23 @@ python src/hmm/predict_regime.py
 Loads the trained model, fetches the last 60 trading days of SPY + VIX, and prints:
 
 ```
-  Current State:  BULL (82% confidence)
-  State persistence:  91% chance same state tomorrow
-  Portfolio guidance:  Full capital deployment, momentum strategies favored
+  Regime:  BULL (92% confidence)
+  Probabilities:  BULL 92%  |  SIDEWAYS 7%  |  BEAR 1%
+
+  Forecast:
+     30d:  BULL 85%  |  SIDEWAYS 12%  |  BEAR 3%
+     60d:  BULL 72%  |  SIDEWAYS 20%  |  BEAR 8%
+     90d:  BULL 61%  |  SIDEWAYS 27%  |  BEAR 12%
+
+  Persistence:  97% chance same state tomorrow
+  Expected duration in current regime:  ~87 trading days
+
+  Portfolio guidance:
+    → Full capital deployment
+    → Momentum strategies favored
 ```
+
+The forecast is computed from the HMM transition matrix: current state probabilities × A^N. This is a genuine model-based forecast of regime persistence, not a price prediction.
 
 Options:
 - `--lookback 30` — use fewer/more recent days (default: 60)
@@ -79,7 +92,7 @@ Options:
 
 ## 2. Per-Ticker Trend Quality
 
-Assesses trend quality for individual stocks using per-ticker 3-state HMMs.
+Assesses trend quality for individual stocks using a **4-state HMM trained on multi-horizon returns** (21, 63, and 252 trading days). These are the same windows from the academic trend-following literature (Moskowitz, Ooi & Pedersen 2012; Hurst, Ooi & Pedersen 2017).
 
 ### 2.1 Training
 
@@ -98,7 +111,6 @@ python src/hmm/train_trend.py --all
 Each ticker produces a model file at `data/hmm_trend_params/<TICKER>.pkl`.
 
 Options:
-- `--years 3` — fewer years of training data (default: 5)
 - `--save-dir data/custom_dir` — custom output directory
 
 Re-run quarterly, or when a ticker's behavior changes structurally.
@@ -114,16 +126,35 @@ python src/hmm/predict_trend.py NVDA
 Output:
 ```
   Ticker:  NVDA
-  State:   STRONG_UPTREND (94% confidence)
-  Trend age:         63 trading days
-  Persistence:       96% chance same state tomorrow
-  Quality grade:     A (score: 3.72)
+  State:   STRONG_UPTREND (96% confidence)
+
+  Returns:
+    1-month:   +5.3%
+    3-month:   +22.1%
+    12-month:  +45.2%
+
+  Forecast:
+     30d:  STRONG_UPTREND 93%  |  WEAK_UPTREND 5%  |  SIDEWAYS 2%
+     60d:  STRONG_UPTREND 87%  |  WEAK_UPTREND 9%  |  SIDEWAYS 4%
+     90d:  STRONG_UPTREND 81%  |  WEAK_UPTREND 12%  |  SIDEWAYS 6%
+
+  Quality grade:  A (score: 0.88)
 ```
+
+The forecast is computed from the HMM transition matrix — it shows the probability of staying in each state over time.
 
 Compare multiple tickers in a table:
 
 ```bash
 python src/hmm/predict_trend.py NVDA AMD MU --compare
+```
+
+Output:
+```
+Ticker  State             Conf   R_21%   R_63%  R_252%  Grade
+NVDA    STRONG_UPTREND    96%   +5.3   +22.1   +45.2      A
+AMD     WEAK_UPTREND      72%   +1.2   +8.4    +18.7      B
+MU      SIDEWAYS          81%   -0.8   +3.2    +12.1      C
 ```
 
 All portfolio tickers:
@@ -136,13 +167,15 @@ python src/hmm/predict_trend.py --all
 
 | Grade | Score Range | Meaning |
 |-------|-------------|---------|
-| A | 3.5–4.0 | Strong, persistent trend |
-| B | 2.5–3.5 | Good quality trend |
-| C | 1.5–2.5 | Moderate/weakening trend |
-| D | 0.5–1.5 | Weak trend |
-| F | < 0.5 | No clear trend |
+| A | 0.75–1.00 | Strong, persistent uptrend |
+| B | 0.55–0.75 | Good quality uptrend |
+| C | 0.35–0.55 | Moderate/weakening trend |
+| D | 0.15–0.35 | Weak/no clear trend |
+| F | < 0.15 | Downtrend or no trend |
 
-**Formula components:** Confidence (30%) + Persistence (30%) + Volatility tightness (20%) + Trend age (20%).
+**Formula:** State score (40%) × Confidence (30%) + 60-day Forecast probability (30%)
+
+State scores: STRONG_UPTREND = 1.0, WEAK_UPTREND = 0.66, SIDEWAYS = 0.33, DOWNTREND = 0.0
 
 ---
 
@@ -153,13 +186,14 @@ python src/hmm/predict_trend.py --all
 ```bash
 nix develop
 
-# 1. Check market regime
+# 1. Check market regime + forecast
 python src/hmm/predict_regime.py
-# → "BULL 82%" → proceed with full deployment
+# → "BULL 92%, 85% chance continues for 60 days"
+# → Proceed with full TSMOM deployment
 
 # 2. Check which stocks have clean trends
 python src/hmm/predict_trend.py --all --compare
-# → Focus on A/B grades, skip C/D/F
+# → Focus on A/B grades, skip D/F
 
 # 3. Run existing system
 make ratings
@@ -182,7 +216,6 @@ python src/hmm/train_regime.py
 ```
 src/hmm/
 ├── __init__.py            # Package init
-├── portfolio.py           # Shared CURRENT_PORTFOLIO ticker list
 ├── train_regime.py        # Market regime HMM training
 ├── predict_regime.py      # Market regime HMM prediction
 ├── train_trend.py         # Per-ticker trend HMM training
@@ -212,8 +245,4 @@ tests/
 python -m pytest tests/test_hmm_*.py -v
 ```
 
-> **Note:** `pytest` is not included in the Nix devShell by default. Install it temporarily with:
-> ```bash
-> nix shell nixpkgs#python312Packages.pytest -c python -m pytest tests/test_hmm_*.py -v
-> ```
-> Or add it to the `buildInputs` in `flake.nix`.
+All tests should pass. If `pytest` is not available, ensure it's added to `buildInputs` in `flake.nix`.
