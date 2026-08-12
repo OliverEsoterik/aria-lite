@@ -55,6 +55,16 @@ We use a `Makefile` to orchestrate local development tasks cleanly. Once inside 
 * `make migrate`: Manually applies the SQL schema changes. (Already included in `make setup`).
 * `make clean`: **(Warning)** Shuts down the database and deletes the local database data folder (`.db_data`). Use this if you want to wipe everything and start from scratch.
 
+**HMM tools** (no database required):
+* `make hmm-train-regime`: Train market regime HMM on SPY + VIX.
+* `make hmm-predict-regime`: Predict current Bull/Bear/Sideways regime.
+* `make hmm-train-trend TICKERS="NVDA AMD"`: Train trend HMMs for specific tickers.
+* `make hmm-train-trend-all`: Train trend HMMs for all portfolio tickers.
+* `make hmm-predict-trend TICKERS="NVDA" [COMPARE=1]`: Predict trend quality for tickers.
+* `make hmm-predict-trend-all [COMPARE=1]`: Predict trend quality for all portfolio tickers.
+
+See [`src/hmm/README.md`](src/hmm/README.md) for full documentation.
+
 ---
 
 ## 📂 Architecture & Details
@@ -195,4 +205,43 @@ in {
 ```
 
 **Note:** This setup requires that your system's PostgreSQL has the `timescaledb` extension enabled and a database named `alphapicks` created.
+
+---
+
+## HMM Regime Detector & Trend Quality
+
+Standalone advisory tools using Hidden Markov Models — no changes to the existing trading system.
+
+See the **[dedicated HMM documentation](src/hmm/README.md)** for full usage, workflow, and reference.
+
+### Quick Start (inside `nix develop`)
+
+```bash
+# Train market regime model
+make hmm-train-regime
+
+# Predict current regime
+make hmm-predict-regime
+```
+
+```bash
+# Train trend models for all portfolio tickers
+make hmm-train-trend-all
+
+# Predict all trends
+make hmm-predict-trend-all
+```
+
+### Commands
+
+| Target | Description |
+|--------|-------------|
+| `make hmm-train-regime` | Train regime HMM (SPY + VIX) |
+| `make hmm-predict-regime` | Predict current market regime |
+| `make hmm-train-trend TICKERS="NVDA AMD"` | Train trend HMMs for specific tickers |
+| `make hmm-train-trend-all` | Train trend HMMs for all portfolio tickers |
+| `make hmm-predict-trend TICKERS="NVDA" [COMPARE=1]` | Predict trend quality |
+| `make hmm-predict-trend-all [COMPARE=1]` | Predict trends for all portfolio tickers |
+
+These targets do **not** require the database — they use yfinance directly.
 

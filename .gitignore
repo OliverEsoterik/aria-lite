@@ -19,3 +19,7 @@ skills/
 work/
 .pi-loop.json.lock
 AGENTS.md
+
+# Hidden Markov Model training artifacts (generated)
+data/hmm_regime_params.pkl
+data/hmm_trend_params/*.pkl
