@@ -47,7 +47,7 @@ def fetch_returns(ticker: str, years: int = 5) -> np.ndarray:
     if data.empty:
         raise ValueError(f"No data for {ticker}")
 
-    prices = data["Close"].dropna()
+    prices = data["Close"].iloc[:, 0].dropna()
     # Rolling returns
     r21 = prices.pct_change(21).dropna()
     r63 = prices.pct_change(63).dropna()

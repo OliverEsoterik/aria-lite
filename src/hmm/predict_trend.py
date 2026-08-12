@@ -52,7 +52,7 @@ def fetch_recent_returns(ticker: str, lookback_days: int = 252) -> np.ndarray:
     if data.empty:
         raise ValueError(f"No recent data for {ticker}")
 
-    prices = data["Close"].dropna()
+    prices = data["Close"].iloc[:, 0].dropna()
     r21 = prices.pct_change(21)
     r63 = prices.pct_change(63)
     r252 = prices.pct_change(252)
