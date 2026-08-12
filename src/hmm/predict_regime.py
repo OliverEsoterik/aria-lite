@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+import hmmlearn.hmm as hmm
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -71,10 +72,43 @@ def fetch_recent_data(lookback_days: int = 60) -> np.ndarray:
     return recent[["spy_return", "vix_close"]].values
 
 
+def compute_forecast(
+    model: hmm.GaussianHMM,
+    current_probs: np.ndarray,
+    horizons: list[int] = None,
+) -> dict[int, list[float]]:
+    """Compute N-step-ahead state distribution using the transition matrix.
+
+    P(state at t+N) = P(state at t) x A^N
+
+    Args:
+        model: Trained GaussianHMM.
+        current_probs: Current state probabilities from Forward algorithm.
+        horizons: List of trading-day horizons (default: [30, 60, 90]).
+
+    Returns:
+        Dict mapping horizon -> list of state probabilities.
+    """
+    if horizons is None:
+        horizons = [30, 60, 90]
+
+    transmat = model.transmat_
+    forecast = {}
+    for step in horizons:
+        # A^step
+        power = np.linalg.matrix_power(transmat, step)
+        # P(t+N) = P(t) @ A^N
+        future = current_probs @ power
+        forecast[step] = [round(float(p), 4) for p in future]
+
+    return forecast
+
+
 def predict_regime(
     params_path: str = "data/hmm_regime_params.pkl",
     lookback_days: int = 60,
     recent_observations: Optional[np.ndarray] = None,
+    forecast_horizons: list[int] = None,
 ) -> dict:
     """Predict current market regime using a trained HMM.
 
@@ -133,6 +167,9 @@ def predict_regime(
     # Guidance
     guidance = _GUIDANCE.get(state_label, _GUIDANCE["SIDEWAYS"])
 
+    # Forecast
+    forecast = compute_forecast(model, current_probs, forecast_horizons)
+
     return {
         "state": state_label,
         "confidence": round(confidence, 4),
@@ -140,6 +177,7 @@ def predict_regime(
         "persistence": round(persistence, 4),
         "state_labels": state_labels,
         "guidance": guidance,
+        "forecast": forecast,
     }
 
 
@@ -149,23 +187,39 @@ def print_report(result: dict) -> None:
     conf = result["confidence"] * 100
     probs = result["probabilities"]
     labels = result["state_labels"]
-    persist = result["persistence"] * 100
+    persist = result["persistence"]
     guidance = result["guidance"]
+    forecast = result["forecast"]
 
     prob_str = "  |  ".join(
         f"{labels[i]}: {probs[i]*100:.0f}%"
         for i in range(len(labels))
     )
 
+    # Expected duration = 1 / (1 - a_ii)
+    state_idx = labels.index(state)
+    expected_duration = 1.0 / (1.0 - persist) if persist < 1.0 else float("inf")
+
     print()
-    print(f"{'=' * 50}")
+    print(f"{'=' * 55}")
     print(f"  HMM Regime Report  —  {datetime.now().strftime('%Y-%m-%d')}")
-    print(f"{'=' * 50}")
+    print(f"{'=' * 55}")
     print()
-    print(f"  Current State:  {state} ({conf:.0f}% confidence)")
+    print(f"  Regime:  {state} ({conf:.0f}% confidence)")
     print(f"  Probabilities:  {prob_str}")
     print()
-    print(f"  State persistence:  {persist:.0f}% chance same state tomorrow")
+    print(f"  Forecast:")
+    for horizon in sorted(forecast.keys()):
+        fprobs = forecast[horizon]
+        fstr = "  |  ".join(
+            f"{labels[i]}: {fprobs[i]*100:.0f}%"
+            for i in range(len(labels))
+        )
+        label = f"{horizon}d" if horizon < 365 else f"{horizon/365:.0f}y"
+        print(f"    {label:>6}:  {fstr}")
+    print()
+    print(f"  Persistence:  {persist*100:.0f}% chance same state tomorrow")
+    print(f"  Expected duration in current regime:  {expected_duration:.0f} trading days")
     print()
     print(f"  Portfolio guidance:")
     print(f"    → {guidance['deployment']}")
