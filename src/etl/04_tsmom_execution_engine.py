@@ -262,35 +262,52 @@ def print_orders(orders: pd.DataFrame, total_value: Optional[float] = None) -> N
     """
     Print the full portfolio position table.
 
-    Expects the full (unfiltered) DataFrame from calculate_orders(actionable_only=False).
-    Sorted: SELL → BUY → REBALANCE → HOLD.
-
-    Args:
-        total_value: Optional total portfolio value (EUR) for the header display.
+    If total_value is provided, EUR amounts are shown alongside percentages.
     """
     n_sell      = (orders["Action"] == "SELL").sum()
     n_buy       = (orders["Action"] == "BUY").sum()
     n_rebalance = (orders["Action"] == "REBALANCE").sum()
     n_hold      = (orders["Action"] == "HOLD").sum()
 
-    print(f"\n{'=' * 66}")
+    has_eur = total_value is not None and total_value > 0
+
+    print(f"\n{'=' * 80}")
     print(f"  TSMOM EXECUTION ENGINE — {pd.Timestamp.today().date()}")
     print(f"  {len(orders)} tickers  |  "
           f"{n_sell} SELL  {n_buy} BUY  {n_rebalance} REBALANCE  {n_hold} HOLD")
-    print("=" * 66)
-    print(f"  {'Ticker':<8} {'Curr%':>7} {'Tgt%':>7} {'Delta%':>8}  Action")
-    print("  " + "-" * 52)
+    if has_eur:
+        print(f"  Portfolio value: €{total_value:,.0f}")
+    print("=" * 80)
+
+    if has_eur:
+        print(f"  {'Ticker':<8} {'Curr €':>12} {'Curr%':>7} {'Tgt €':>12} {'Tgt%':>7} {'Delta €':>12} {'Delta%':>8}  Action")
+        print("  " + "-" * 76)
+    else:
+        print(f"  {'Ticker':<8} {'Curr%':>7} {'Tgt%':>7} {'Delta%':>8}  Action")
+        print("  " + "-" * 52)
 
     for ticker, row in orders.iterrows():
-        curr  = f"{row['Current_Weight']*100:.2f}"
-        tgt   = f"{row['Target_Weight']*100:.2f}"
-        delta = f"{row['Weight_Delta']*100:+.2f}"
         action = row["Action"]
         marker = "  "
         if action == "SELL":      marker = "✖ "
         elif action == "BUY":     marker = "✚ "
         elif action == "REBALANCE": marker = "↕ "
-        print(f"{marker}{ticker:<8} {curr:>7} {tgt:>7} {delta:>8}  {action}")
+
+        if has_eur:
+            curr_eur  = row["Current_Weight"] * total_value
+            tgt_eur   = row["Target_Weight"] * total_value
+            delta_eur = row["Weight_Delta"] * total_value
+            curr_pct  = row["Current_Weight"] * 100
+            tgt_pct   = row["Target_Weight"] * 100
+            delta_pct = row["Weight_Delta"] * 100
+            print(f"{marker}{ticker:<8} €{curr_eur:>9,.0f} {curr_pct:>6.2f} "
+                  f"€{tgt_eur:>9,.0f} {tgt_pct:>6.2f} "
+                  f"€{delta_eur:>+9,.0f} {delta_pct:>+7.2f}  {action}")
+        else:
+            curr  = f"{row['Current_Weight']*100:.2f}"
+            tgt   = f"{row['Target_Weight']*100:.2f}"
+            delta = f"{row['Weight_Delta']*100:+.2f}"
+            print(f"{marker}{ticker:<8} {curr:>7} {tgt:>7} {delta:>8}  {action}")
 
     print()
 
