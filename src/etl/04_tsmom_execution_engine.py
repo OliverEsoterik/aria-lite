@@ -105,8 +105,24 @@ class TSMOMExecutionEngine:
             }
         )
 
-        # Volatility-targeted weights — no normalization so target_vol actually controls sizing
-        target_weights = (self.target_annual_volatility / annualised_vol) * trend
+        # Volatility-targeted weights — two-step approach per Moskowitz et al. (2012)
+        # Step 1: vol-equalize among trending stocks (relative weights)
+        # Step 2: scale total deployment by target_vol / avg_vol_of_trending_stocks
+        trending = [t for t in prices.columns if trend[t] == 1]
+        target_weights = pd.Series(0.0, index=prices.columns)
+
+        if trending:
+            # Step 1: relative weights based on inverse vol
+            inv_vol = 1.0 / annualised_vol[trending]
+            rel_weights = inv_vol / inv_vol.sum()
+
+            # Step 2: deployment = target_vol / weighted average vol of trending stocks
+            avg_vol = (rel_weights * annualised_vol[trending]).sum()
+            deployment = self.target_annual_volatility / avg_vol
+
+            for ticker in trending:
+                target_weights[ticker] = rel_weights[ticker] * deployment
+
         target_weights = target_weights.fillna(0.0)
 
         # Order generation
