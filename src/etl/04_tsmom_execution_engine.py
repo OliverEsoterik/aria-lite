@@ -250,7 +250,9 @@ def load_positions(positions_file: str) -> Dict[str, float]:
         sys.exit("[ERROR] Positions file must contain a JSON object (dict).")
 
     for ticker, amount in raw.items():
-        if not isinstance(amount, (int, float)):
+        try:
+            amount = float(amount)
+        except (ValueError, TypeError):
             sys.exit(f"[ERROR] Invalid position for {ticker}: expected a number, got {type(amount).__name__}")
         if amount < 0:
             sys.exit(f"[ERROR] Negative position for {ticker}: {amount}")
@@ -333,7 +335,13 @@ def main() -> None:
     args = parser.parse_args()
 
     # Deduplicate portfolio tickers (CURRENT_PORTFOLIO has duplicates)
-    tickers = list(dict.fromkeys(CURRENT_PORTFOLIO))
+    raw_positions: Optional[Dict[str, float]] = None
+    if args.positions_file is not None:
+        # When a positions file is given, evaluate only those tickers
+        raw_positions = load_positions(args.positions_file)
+        tickers = list(dict.fromkeys(raw_positions.keys()))
+    else:
+        tickers = list(dict.fromkeys(CURRENT_PORTFOLIO))
 
     print(f"[INFO] Fetching price history for {len(tickers)} tickers...")
     db_engine = create_engine(DB_URL, pool_size=5, max_overflow=10)
@@ -348,8 +356,7 @@ def main() -> None:
     total_portfolio_value: Optional[float] = None
 
     if args.positions_file is not None:
-        # Load positions BEFORE filtering so we can detect held-but-dropped tickers
-        raw_positions = load_positions(args.positions_file)
+        # raw_positions already loaded above; compute total and convert to weights
         total_portfolio_value = sum(raw_positions.values())
 
         if total_portfolio_value <= 0:
