@@ -227,6 +227,37 @@ def load_weights(tickers: List[str], weights_file: Optional[str] = None) -> Dict
     return {t: float(raw.get(t, 0.0)) for t in tickers}
 
 
+def load_positions(positions_file: str) -> Dict[str, float]:
+    """
+    Load current portfolio positions from a JSON file.
+
+    Format: {"TICKER": euro_amount, ...}
+        - euro_amount must be >= 0.0 (zero means "not held")
+        - Negative values raise SystemExit
+
+    Returns {ticker: absolute_amount}.
+    """
+    if not os.path.exists(positions_file):
+        sys.exit(f"[ERROR] Positions file not found: {positions_file}")
+
+    try:
+        with open(positions_file) as f:
+            raw = json.load(f)
+    except json.JSONDecodeError as exc:
+        sys.exit(f"[ERROR] Invalid JSON in positions file: {exc}")
+
+    if not isinstance(raw, dict):
+        sys.exit("[ERROR] Positions file must contain a JSON object (dict).")
+
+    for ticker, amount in raw.items():
+        if not isinstance(amount, (int, float)):
+            sys.exit(f"[ERROR] Invalid position for {ticker}: expected a number, got {type(amount).__name__}")
+        if amount < 0:
+            sys.exit(f"[ERROR] Negative position for {ticker}: {amount}")
+
+    return {str(ticker).upper(): float(amount) for ticker, amount in raw.items()}
+
+
 def print_orders(orders: pd.DataFrame) -> None:
     """
     Print the full portfolio position table.
@@ -271,6 +302,13 @@ def main() -> None:
         default=None,
         help="JSON file mapping ticker→current decimal weight. "
              "Omit to use equal-weight across all portfolio tickers.",
+    )
+    parser.add_argument(
+        "--positions-file",
+        metavar="PATH",
+        default=None,
+        help="JSON file mapping ticker→current EUR amount (e.g. {\"NVDA\": 10000}). "
+             "Overrides --weights-file if both are given.",
     )
     args = parser.parse_args()
 
