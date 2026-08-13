@@ -105,12 +105,9 @@ class TSMOMExecutionEngine:
             }
         )
 
-        # Volatility-targeted raw weights
-        raw_weights = (self.target_annual_volatility / annualised_vol) * trend
-        raw_weights = raw_weights.fillna(0.0)
-
-        total = raw_weights.sum()
-        target_weights = raw_weights / total if total > 0 else pd.Series(0.0, index=prices.columns)
+        # Volatility-targeted weights — no normalization so target_vol actually controls sizing
+        target_weights = (self.target_annual_volatility / annualised_vol) * trend
+        target_weights = target_weights.fillna(0.0)
 
         # Order generation
         records = []
@@ -280,6 +277,9 @@ def print_orders(orders: pd.DataFrame, total_value: Optional[float] = None, vol_
           f"{'  |  Vol target: ' + str(round(vol_target * 100)) + '%' if vol_target else ''}")
     if has_eur:
         print(f"  Portfolio value: €{total_value:,.0f}")
+        total_target_pct = orders["Target_Weight"].sum() * 100
+        print(f"  Target allocation: {total_target_pct:.1f}% of capital  "
+              f"(cash: {max(0, 100 - total_target_pct):.1f}%)")
     print("=" * 80)
 
     if has_eur:
