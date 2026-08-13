@@ -345,9 +345,9 @@ def main() -> None:
     parser.add_argument(
         "--volatility-target",
         type=float,
-        default=0.15,
-        help="Annual volatility target (decimal, default 0.15 = 15%%). "
-             "Higher = more aggressive position sizing.",
+        default=1.0,
+        help="Portfolio volatility target (decimal). Default 1.0 (100%%) — deploy near-full capital. "
+             "Lower values reserve more cash. Affects concentration: higher = more weight on low-vol stocks.",
     )
     parser.add_argument(
         "--positions-file",

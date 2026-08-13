@@ -45,7 +45,7 @@ We use a `Makefile` to orchestrate local development tasks cleanly. Once inside 
 * `make run`: The standard command to run your daily scripts. It ensures the database is running in the background and executes the ETL pipeline.
 * `make ratings`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
 * `make tsmom`: Runs the TSMOM Execution Engine against your current portfolio, printing a full position table with recommended actions.
-* `make tsmom-positions POSITIONS_FILE=path/to/positions.json [VOLATILITY_TARGET=0.15]`: Same as above, but reads your current holdings as **absolute EUR amounts** (`{"NVDA": 10000, "MSFT": 8000}`) instead of decimal weights. Optionally set a volatility target (e.g. `VOLATILITY_TARGET=0.25` for 25%) to control position sizing — higher = more aggressive.
+* `make tsmom-positions POSITIONS_FILE=path/to/positions.json [VOLATILITY_TARGET=1]`: Reads your current holdings as **absolute EUR amounts** (`{"NVDA": 10000, "MSFT": 8000}`) and computes target allocations. Set `VOLATILITY_TARGET=1` (default for fully-invested portfolios) to deploy near-full capital. Lower values (e.g. `0.15`) reserve more cash.
 * `make tsmom-weights WEIGHTS_FILE=path/to/weights.json`: Same as above, but reads your actual position weights from a JSON file (`{"NVDA": 0.08, "MSFT": 0.05, ...}`) instead of assuming equal weight.
 * `make tsmom-rank`: Ranks tickers by multi-window TSMOM composite (Composite > 0, Hurst et al. 2017).
 * `make tsmom-rank-all`: Includes off-trend tickers in the ranking (useful for spotting tickers near flipping on).
@@ -113,7 +113,7 @@ For each ticker in `CURRENT_PORTFOLIO` it computes a price-only trend signal and
 >
 > This is the recommended way to run the engine — you see exactly how much to buy or sell in cash terms, not just percentage deltas.
 
-**Volatility target:** Add `VOLATILITY_TARGET=0.25` to the make command (e.g. `make tsmom-positions POSITIONS_FILE=... VOLATILITY_TARGET=0.25`) to control aggressiveness. Default is 15% (`0.15`). Higher = larger positions, more risk. Lower = smaller positions, more conservative.
+**Volatility target:** `VOLATILITY_TARGET` controls how much capital the model wants to deploy. Default is `0.15` (15%), which typically results in a low allocation (mostly cash). Set `VOLATILITY_TARGET=1` (100%) to deploy near-full capital, which is the right setting if you're always fully invested. The target acts as a concentration dial: lower values flatten toward equal-weight, higher values skew more heavily toward lower-volatility stocks.
 
 **Trend signal (price-only):** `T_i = 1` if `Price > SMA_210` AND `12-month return > 0`, else `0`.
 
