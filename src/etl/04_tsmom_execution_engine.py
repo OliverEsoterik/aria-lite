@@ -282,7 +282,7 @@ def print_orders(orders: pd.DataFrame, total_value: Optional[float] = None) -> N
     print("=" * 80)
 
     if has_eur:
-        print(f"  {'Ticker':<8} {'Curr €':>12} {'Curr%':>7} {'Tgt €':>12} {'Tgt%':>7} {'Delta €':>12} {'Delta%':>8}  Action")
+        print(f"  {'Ticker':<8} {'Curr (€)':>12} {'Curr%':>7} {'Tgt (€)':>12} {'Tgt%':>7} {'Delta (€)':>12} {'Delta%':>8}  Action")
         print("  " + "-" * 82)
     else:
         print(f"  {'Ticker':<8} {'Curr%':>7} {'Tgt%':>7} {'Delta%':>8}  Action")
@@ -302,9 +302,9 @@ def print_orders(orders: pd.DataFrame, total_value: Optional[float] = None) -> N
             curr_pct  = row["Current_Weight"] * 100
             tgt_pct   = row["Target_Weight"] * 100
             delta_pct = row["Weight_Delta"] * 100
-            print(f"{marker}{ticker:<8} €{curr_eur:>11,.0f} {curr_pct:>6.2f}% "
-                  f"€{tgt_eur:>11,.0f} {tgt_pct:>6.2f}% "
-                  f"€{delta_eur:>+11,.0f} {delta_pct:>+7.2f}%  {action}")
+            print(f"{marker}{ticker:<8} {curr_eur:>12,.0f} {curr_pct:>6.2f}% "
+                  f"{tgt_eur:>12,.0f} {tgt_pct:>6.2f}% "
+                  f"{delta_eur:>+12,.0f} {delta_pct:>+7.2f}%  {action}")
         else:
             curr  = f"{row['Current_Weight']*100:.2f}"
             tgt   = f"{row['Target_Weight']*100:.2f}"
