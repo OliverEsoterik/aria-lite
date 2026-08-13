@@ -405,7 +405,7 @@ def main() -> None:
     else:
         current_weights = load_weights(valid_tickers, args.weights_file)
 
-    Eng = TSMOMExecutionEngine(target_annual_volatility=args.volatility_target)
+    eng = TSMOMExecutionEngine(target_annual_volatility=args.volatility_target)
     try:
         orders = eng.calculate_orders(prices, current_weights, actionable_only=False)
     except ValueError as exc:
