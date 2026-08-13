@@ -1,4 +1,4 @@
-.PHONY: setup start-db stop-db stop status migrate run ratings tsmom tsmom-weights clean \
+.PHONY: setup start-db stop-db stop status migrate run ratings tsmom tsmom-weights tsmom-positions clean \
 	hmm-train-regime hmm-predict-regime hmm-train-trend hmm-train-trend-all \
 	hmm-predict-trend hmm-predict-trend-all
 
@@ -71,6 +71,11 @@ tsmom-weights: start-db
 	@test -n "$(WEIGHTS_FILE)" || (echo "[ERROR] Usage: make tsmom-weights WEIGHTS_FILE=path/to/weights.json" && exit 1)
 	@echo "Running TSMOM Execution Engine with weights file..."
 	cd src/etl && python3 04_tsmom_execution_engine.py --weights-file ../../$(WEIGHTS_FILE)
+
+tsmom-positions: start-db
+	@test -n "$(POSITIONS_FILE)" || (echo "[ERROR] Usage: make tsmom-positions POSITIONS_FILE=path/to/positions.json" && exit 1)
+	@echo "Running TSMOM Execution Engine with positions file..."
+	cd src/etl && python3 04_tsmom_execution_engine.py --positions-file ../../$(POSITIONS_FILE)
 
 tsmom-rank: start-db
 	@echo "Ranking portfolio by TSMOM momentum strength..."
