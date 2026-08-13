@@ -73,9 +73,9 @@ tsmom-weights: start-db
 	cd src/etl && python3 04_tsmom_execution_engine.py --weights-file ../../$(WEIGHTS_FILE)
 
 tsmom-positions: start-db
-	@test -n "$(POSITIONS_FILE)" || (echo "[ERROR] Usage: make tsmom-positions POSITIONS_FILE=path/to/positions.json" && exit 1)
+	@test -n "$(POSITIONS_FILE)" || (echo "[ERROR] Usage: make tsmom-positions POSITIONS_FILE=path/to/positions.json [VOLATILITY_TARGET=0.15]" && exit 1)
 	@echo "Running TSMOM Execution Engine with positions file..."
-	cd src/etl && python3 04_tsmom_execution_engine.py --positions-file ../../$(POSITIONS_FILE)
+	cd src/etl && python3 04_tsmom_execution_engine.py --positions-file ../../$(POSITIONS_FILE) $(if $(VOLATILITY_TARGET),--volatility-target $(VOLATILITY_TARGET),)
 
 tsmom-rank: start-db
 	@echo "Ranking portfolio by TSMOM momentum strength..."

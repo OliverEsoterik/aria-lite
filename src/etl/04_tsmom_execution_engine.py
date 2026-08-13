@@ -260,7 +260,7 @@ def load_positions(positions_file: str) -> Dict[str, float]:
     return {str(ticker).upper(): float(amount) for ticker, amount in raw.items()}
 
 
-def print_orders(orders: pd.DataFrame, total_value: Optional[float] = None) -> None:
+def print_orders(orders: pd.DataFrame, total_value: Optional[float] = None, vol_target: Optional[float] = None) -> None:
     """
     Print the full portfolio position table.
 
@@ -276,7 +276,8 @@ def print_orders(orders: pd.DataFrame, total_value: Optional[float] = None) -> N
     print(f"\n{'=' * 80}")
     print(f"  TSMOM EXECUTION ENGINE — {pd.Timestamp.today().date()}")
     print(f"  {len(orders)} tickers  |  "
-          f"{n_sell} SELL  {n_buy} BUY  {n_rebalance} REBALANCE  {n_hold} HOLD")
+          f"{n_sell} SELL  {n_buy} BUY  {n_rebalance} REBALANCE  {n_hold} HOLD"
+          f"{'  |  Vol target: ' + str(round(vol_target * 100)) + '%' if vol_target else ''}")
     if has_eur:
         print(f"  Portfolio value: €{total_value:,.0f}")
     print("=" * 80)
@@ -324,6 +325,13 @@ def main() -> None:
         default=None,
         help="JSON file mapping ticker→current decimal weight. "
              "Omit to use equal-weight across all portfolio tickers.",
+    )
+    parser.add_argument(
+        "--volatility-target",
+        type=float,
+        default=0.15,
+        help="Annual volatility target (decimal, default 0.15 = 15%%). "
+             "Higher = more aggressive position sizing.",
     )
     parser.add_argument(
         "--positions-file",
@@ -397,13 +405,13 @@ def main() -> None:
     else:
         current_weights = load_weights(valid_tickers, args.weights_file)
 
-    eng = TSMOMExecutionEngine()
+    Eng = TSMOMExecutionEngine(target_annual_volatility=args.volatility_target)
     try:
         orders = eng.calculate_orders(prices, current_weights, actionable_only=False)
     except ValueError as exc:
         sys.exit(f"[ERROR] {exc}")
 
-    print_orders(orders, total_value=total_portfolio_value)
+    print_orders(orders, total_value=total_portfolio_value, vol_target=args.volatility_target)
 
 
 if __name__ == "__main__":
