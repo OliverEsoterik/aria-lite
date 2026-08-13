@@ -258,12 +258,15 @@ def load_positions(positions_file: str) -> Dict[str, float]:
     return {str(ticker).upper(): float(amount) for ticker, amount in raw.items()}
 
 
-def print_orders(orders: pd.DataFrame) -> None:
+def print_orders(orders: pd.DataFrame, total_value: Optional[float] = None) -> None:
     """
     Print the full portfolio position table.
 
     Expects the full (unfiltered) DataFrame from calculate_orders(actionable_only=False).
     Sorted: SELL → BUY → REBALANCE → HOLD.
+
+    Args:
+        total_value: Optional total portfolio value (EUR) for the header display.
     """
     n_sell      = (orders["Action"] == "SELL").sum()
     n_buy       = (orders["Action"] == "BUY").sum()
@@ -322,8 +325,32 @@ def main() -> None:
     if prices.empty:
         sys.exit("[ERROR] No price data returned from DB. Is the database running?")
 
-    # Load weights BEFORE filtering so we can detect held-but-dropped tickers
-    all_tickers_weights = load_weights(list(prices.columns), args.weights_file)
+    # ------------------------------------------------------------
+    # Load current holdings: positions file, weights file, or equal-weight
+    # ------------------------------------------------------------
+    total_portfolio_value: Optional[float] = None
+
+    if args.positions_file is not None:
+        # Load positions BEFORE filtering so we can detect held-but-dropped tickers
+        raw_positions = load_positions(args.positions_file)
+        total_portfolio_value = sum(raw_positions.values())
+
+        if total_portfolio_value <= 0:
+            sys.exit("[ERROR] Total portfolio value must be > 0 in positions file.")
+
+        # Build weight dict for ALL price-available tickers (before filtering)
+        all_tickers_weights = {
+            t: raw_positions.get(t, 0.0) / total_portfolio_value
+            for t in prices.columns
+        }
+        print(f"[INFO] Loaded positions for {len(raw_positions)} ticker(s), "
+              f"total portfolio value = \u20ac{total_portfolio_value:,.0f}")
+
+        if args.weights_file is not None:
+            print("[INFO] --positions-file takes precedence; ignoring --weights-file.")
+    else:
+        # Fall back to existing weights-file or equal-weight
+        all_tickers_weights = load_weights(list(prices.columns), args.weights_file)
 
     # Drop tickers with insufficient data (< 252 rows after pivot)
     valid_tickers = [t for t in prices.columns if prices[t].notna().sum() >= 252]
@@ -341,7 +368,10 @@ def main() -> None:
         if w > 0.0:
             print(f"[WARN] {ticker}: held (weight={w:.4f}) but insufficient price history — no SELL generated", file=sys.stderr)
 
-    current_weights = load_weights(valid_tickers, args.weights_file)
+    if args.positions_file is not None:
+        current_weights = {t: raw_positions.get(t, 0.0) / total_portfolio_value for t in valid_tickers}
+    else:
+        current_weights = load_weights(valid_tickers, args.weights_file)
 
     eng = TSMOMExecutionEngine()
     try:
@@ -349,7 +379,7 @@ def main() -> None:
     except ValueError as exc:
         sys.exit(f"[ERROR] {exc}")
 
-    print_orders(orders)
+    print_orders(orders, total_value=total_portfolio_value)
 
 
 if __name__ == "__main__":
