@@ -45,6 +45,7 @@ We use a `Makefile` to orchestrate local development tasks cleanly. Once inside 
 * `make run`: The standard command to run your daily scripts. It ensures the database is running in the background and executes the ETL pipeline.
 * `make ratings`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
 * `make tsmom`: Runs the TSMOM Execution Engine against your current portfolio, printing a full position table with recommended actions.
+* `make tsmom-positions POSITIONS_FILE=path/to/positions.json`: Same as above, but reads your current holdings as **absolute EUR amounts** (`{"NVDA": 10000, "MSFT": 8000}`) instead of decimal weights. The engine computes position sizes and shows both EUR amounts and percentages in the output.
 * `make tsmom-weights WEIGHTS_FILE=path/to/weights.json`: Same as above, but reads your actual position weights from a JSON file (`{"NVDA": 0.08, "MSFT": 0.05, ...}`) instead of assuming equal weight.
 * `make tsmom-rank`: Ranks tickers by multi-window TSMOM composite (Composite > 0, Hurst et al. 2017).
 * `make tsmom-rank-all`: Includes off-trend tickers in the ranking (useful for spotting tickers near flipping on).
@@ -103,6 +104,14 @@ For each ticker in `CURRENT_PORTFOLIO` it computes a price-only trend signal and
 | **SELL** | Trend breaks and you currently hold the position — exit |
 
 > **Note:** `BUY` only fires when you pass real position weights via `--weights-file` and a ticker has weight `0`. With the default equal-weight mode every ticker is treated as held, so only `SELL`, `REBALANCE`, and `HOLD` appear.
+>
+> **EUR positions mode:** Run via `make tsmom-positions POSITIONS_FILE=path/to/positions.json` or directly with `--positions-file`. Supply your current holdings as absolute amounts (e.g. `{"NVDA": 10000, "MSFT": 8000}`). The engine:
+> 1. Sums the amounts to get your total portfolio value
+> 2. Converts to weights internally (each amount / total)
+> 3. Computes target weights from TSMOM
+> 4. Prints both EUR amounts and percentages in the output table
+>
+> This is the recommended way to run the engine — you see exactly how much to buy or sell in cash terms, not just percentage deltas.
 
 **Trend signal (price-only):** `T_i = 1` if `Price > SMA_210` AND `12-month return > 0`, else `0`.
 
