@@ -219,6 +219,18 @@ in {
 
 ---
 
+## 📚 Research References
+
+This project implements or is directly inspired by the following academic papers. Each reference links to the specific code that implements it.
+
+| Paper | Implemented In | What It Provides |
+|-------|---------------|------------------|
+| **Moskowitz, Ooi & Pedersen (2012)** — "Time Series Momentum" ([SSRN](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2089463)) | [`04_tsmom_execution_engine.py`](src/etl/04_tsmom_execution_engine.py) | Volatility-scaling of momentum returns, inverse-vol weighting, and the two-step vol-targeting framework. The trend signal (`P > SMA_210` + `R_252 > 0`) and the exh-ante EWMA vol estimator are drawn directly from this paper. |
+| **Hurst, Ooi & Pedersen (2017)** — "A Century of Evidence on Trend-Following Investing" ([SSRN](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2993026)) | [`05_tsmom_momentum_ranker.py`](src/etl/05_tsmom_momentum_ranker.py) | Multi-window momentum composite: the equal-weighted combination of 21-day, 63-day, and 252-day vol-scaled returns. The hysteresis deadband in the execution engine also follows this paper's turnover-control recommendations. |
+| **Rabiner (1989)** — "A Tutorial on Hidden Markov Models and Selected Applications in Speech Recognition" ([IEEE](https://ieeexplore.ieee.org/document/18626)) | [`src/hmm/`](src/hmm/) (all four modules) | Gaussian HMM training via Baum-Welch (expectation-maximisation) and state prediction via the Viterbi algorithm. The 3-state regime detector and 4-state trend quality models are standard Rabiner-style HMMs applied to financial returns. |
+
+---
+
 ## HMM Regime Detector & Trend Quality
 
 Standalone advisory tools using Hidden Markov Models — no changes to the existing trading system.
