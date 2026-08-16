@@ -19,8 +19,10 @@ From there, all commands below assume you're inside the Nix shell.
 
 | Goal | Command |
 |------|---------|
-| Train market regime model | `make hmm-train-regime` |
-| Predict current regime | `make hmm-predict-regime` |
+| Train all regime models (SPY, SOX, NDX) | `make hmm-train-regime` |
+| Train single regime model | `make hmm-train-regime TICKER=SOX` |
+| Predict all regimes (comparison) | `make hmm-predict-regime` |
+| Predict single regime | `make hmm-predict-regime TICKER=SPY` |
 | Train trend models for portfolio | `make hmm-train-trend-all` |
 | Train trend for specific tickers | `make hmm-train-trend TICKERS="NVDA AMD"` |
 | Predict trend (single) | `make hmm-predict-trend TICKERS="NVDA"` |
@@ -31,17 +33,35 @@ From there, all commands below assume you're inside the Nix shell.
 
 ## 1. Market Regime Detection
 
-Detects **Bull / Bear / Sideways** regimes from SPY returns and VIX levels.
+Trains and predicts **Bull / Bear / Sideways** regimes for multiple indices. Currently supports three indices, each paired with VIX as the volatility proxy:
+
+| Index | Ticker | Scope |
+|-------|--------|-------|
+| **SPY** | S&P 500 | Broad US equity risk premium |
+| **SOX** | Philadelphia Semiconductor Index | Semi-specific cycle |
+| **NDX** | Nasdaq 100 | Tech/growth sentiment |
 
 ### 1.1 Training
 
+Train all three models at once:
+
 ```bash
-python src/hmm/train_regime.py
+make hmm-train-regime
 ```
 
-Trains a 3-state Gaussian HMM on 10 years of SPY + VIX daily data. Saves model parameters to `data/hmm_regime_params.pkl`.
+Or train a single index:
+
+```bash
+make hmm-train-regime TICKER=SOX
+```
+
+Each model is a 3-state Gaussian HMM trained on 10 years of daily data. Models are saved to:
+- `data/hmm_regime_params_spy.pkl`
+- `data/hmm_regime_params_sox.pkl`
+- `data/hmm_regime_params_ndx.pkl`
 
 Options:
+- `--ticker SPY | SOX | NDX` — which index to train on (default: SPY)
 - `--years 15` — use more/fewer years of training data
 - `--states 4` — use more states (default: 3)
 - `--save-path data/my_params.pkl` — custom save path
@@ -50,36 +70,64 @@ Re-run periodically (every 6–12 months) to keep the model current.
 
 ### 1.2 Prediction
 
+Predict all three regimes with a side-by-side comparison:
+
 ```bash
-python src/hmm/predict_regime.py
+make hmm-predict-regime
 ```
 
-Loads the trained model, fetches the last 60 trading days of SPY + VIX, and prints:
-
+Output:
 ```
-  Regime:  BULL (92% confidence)
-  Probabilities:  BULL 92%  |  SIDEWAYS 7%  |  BEAR 1%
+  ============================================================
+  HMM Regime Comparison  —  2025-01-15
+  ============================================================
 
-  Forecast:
-     30d:  BULL 85%  |  SIDEWAYS 12%  |  BEAR 3%
-     60d:  BULL 72%  |  SIDEWAYS 20%  |  BEAR 8%
-     90d:  BULL 61%  |  SIDEWAYS 27%  |  BEAR 12%
+    Index   Regime        Conf    30d Fcast              Persist
+    ─────── ────────────  ─────   ─────────────────────  ────────
+    SPY     BULL          92%     BULL85% SIDEWAYS12%    97%
+    SOX     BULL          78%     BULL72% SIDEWAYS20%    89%
+    NDX     SIDEWAYS      55%     BULL52% SIDEWAYS40%    63%
 
-  Persistence:  97% chance same state tomorrow
-  Expected duration in current regime:  ~87 trading days
+    ✓ SPY and SOX agree — BULL. Full conviction.
 
-  Portfolio guidance:
-    → Full capital deployment
-    → Momentum strategies favored
+  ============================================================
+  HMM Regime Report (SPY)  —  2025-01-15
+  ============================================================
+  ...
 ```
 
-The forecast is computed from the HMM transition matrix: current state probabilities × A^N. This is a genuine model-based forecast of regime persistence, not a price prediction.
+The comparison table is followed by individual detailed reports for each index.
+
+Predict a single index:
+
+```bash
+make hmm-predict-regime TICKER=SPY
+```
+
+Direct Python usage:
+```bash
+python src/hmm/predict_regime.py                         # all three
+python src/hmm/predict_regime.py --ticker SOX            # single
+```
 
 Options:
+- `--ticker SPY | SOX | NDX` — which index to predict (default: all)
 - `--lookback 30` — use fewer/more recent days (default: 60)
 - `--params-path data/custom_params.pkl` — custom model path
 
-### 1.3 Regime Change Response (manual)
+### 1.3 Divergence Heuristics
+
+The comparison report flags key divergences automatically:
+
+| Signal | Meaning |
+|--------|---------|
+| ✓ SPY and SOX agree | Full conviction for semi portfolio |
+| ⚠ SPY ≠ SOX | Semi cycle diverging from broad market — reduce exposure |
+| ⚠ SPY ≠ NDX | Tech/growth telling a different story — context, not action |
+
+The most actionable signal is **SPY Bull + SOX Bear**: broad market is fine, but your sector is in its own down cycle.
+
+### 1.4 Regime Change Response (manual)
 
 | Transition | Action |
 |---|---|
@@ -186,9 +234,9 @@ State scores: STRONG_UPTREND = 1.0, WEAK_UPTREND = 0.66, SIDEWAYS = 0.33, DOWNTR
 ```bash
 nix develop
 
-# 1. Check market regime + forecast
-python src/hmm/predict_regime.py
-# → "BULL 92%, 85% chance continues for 60 days"
+# 1. Check all three regimes + comparison
+make hmm-predict-regime
+# → "SPY BULL 92%, SOX BULL 78% — semi cycle intact"
 # → Proceed with full TSMOM deployment
 
 # 2. Check which stocks have clean trends
@@ -205,8 +253,8 @@ make ratings
 # Retrain trend models
 python src/hmm/train_trend.py --all
 
-# Retrain regime model (every 6-12 months)
-python src/hmm/train_regime.py
+# Retrain all regime models (every 6-12 months)
+make hmm-train-regime
 ```
 
 ---
@@ -223,7 +271,9 @@ src/hmm/
 └── README.md              # This file
 
 data/
-├── hmm_regime_params.pkl  # Trained regime model (created by train_regime.py)
+├── hmm_regime_params_spy.pkl  # Trained regime model for SPY
+├── hmm_regime_params_sox.pkl  # Trained regime model for SOX
+├── hmm_regime_params_ndx.pkl  # Trained regime model for NDX
 └── hmm_trend_params/      # Per-ticker trend models (created by train_trend.py)
     ├── NVDA.pkl
     ├── AMD.pkl

@@ -20,32 +20,48 @@ from hmmlearn import hmm
 from sklearn.preprocessing import StandardScaler
 
 
-def fetch_training_data(years: int = 10) -> np.ndarray:
-    """Fetch SPY daily returns and VIX levels from yfinance.
+TICKER_MAP = {
+    "SPY": "SPY",
+    "SOX": "^SOX",
+    "NDX": "^NDX",
+}
+
+
+def fetch_training_data(ticker: str = "SPY", years: int = 10) -> np.ndarray:
+    """Fetch daily returns for a given index and VIX levels from yfinance.
+
+    Args:
+        ticker: Index ticker (SPY, SOX, or NDX).
+        years: Years of historical data.
 
     Returns:
-        Array of shape (n_days, 2) with columns [SPY_log_return, VIX_close].
+        Array of shape (n_days, 2) with columns [<ticker>_log_return, vix_close].
     """
+    yf_ticker = TICKER_MAP[ticker]
+    name_lower = ticker.lower()
+
     end = datetime.now()
     start = end.replace(year=end.year - years)
 
-    spy = yf.download("SPY", start=start, end=end, progress=False)
+    index_data = yf.download(yf_ticker, start=start, end=end, progress=False)
     vix = yf.download("^VIX", start=start, end=end, progress=False)
 
-    if spy.empty or vix.empty:
-        raise ValueError("Failed to fetch SPY or VIX data from yfinance")
+    if index_data.empty or vix.empty:
+        raise ValueError(f"Failed to fetch {ticker} or VIX data from yfinance")
 
     # Align on date index
-    df = pd.DataFrame(index=spy.index)
-    df["spy_close"] = spy["Close"]
+    df = pd.DataFrame(index=index_data.index)
+    df[f"{name_lower}_close"] = index_data["Close"]
     df["vix_close"] = vix["Close"]
     df = df.dropna()
 
     # Log returns
-    df["spy_return"] = np.log(df["spy_close"] / df["spy_close"].shift(1))
+    df[f"{name_lower}_return"] = np.log(
+        df[f"{name_lower}_close"] / df[f"{name_lower}_close"].shift(1)
+    )
     df = df.dropna()
 
-    features = df[["spy_return", "vix_close"]].values
+    features = df[[f"{name_lower}_return", "vix_close"]].values
     return features
 
 
@@ -80,6 +96,7 @@ def train_regime_model(
     n_states: int = 3,
     n_iter: int = 100,
     n_restarts: int = 5,
+    ticker: str = "SPY",
 ) -> dict:
     """Train a Gaussian HMM on market data and save parameters.
 
@@ -89,13 +106,16 @@ def train_regime_model(
         n_states: Number of hidden states (default: 3).
         n_iter: EM iterations per restart.
         n_restarts: Random restarts to avoid local optima.
+        ticker: Index ticker (SPY, SOX, or NDX).
 
     Returns:
         Dict with 'model', 'scaler', 'state_labels', 'feature_names', 'training_date'.
     """
+    name_lower = ticker.lower()
+
     if features is None:
-        print("[INFO] Fetching training data from yfinance...")
-        features = fetch_training_data(years=10)
+        print(f"[INFO] Fetching {ticker} training data from yfinance...")
+        features = fetch_training_data(ticker=ticker, years=10)
 
     # Standardize features
     scaler = StandardScaler()
@@ -137,8 +157,9 @@ def train_regime_model(
         "model": model,
         "scaler": scaler,
         "state_labels": state_labels,
-        "feature_names": ["spy_log_return", "vix_close"],
+        "feature_names": [f"{name_lower}_log_return", "vix_close"],
         "training_date": datetime.now().isoformat(),
+        "ticker": ticker,
     }
 
     # Save
@@ -157,7 +178,11 @@ def train_regime_model(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Train a 3-state HMM on SPY+VIX for market regime detection"
+        description="Train a 3-state HMM on an index + VIX for market regime detection"
+    )
+    parser.add_argument(
+        "--ticker", default="SPY", choices=list(TICKER_MAP.keys()),
+        help="Index ticker to train on (default: SPY)"
     )
     parser.add_argument(
         "--save-path", default="data/hmm_regime_params.pkl",
@@ -173,13 +198,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print(f"[INFO] Fetching {args.years} years of SPY + VIX data...")
-    features = fetch_training_data(years=args.years)
+    print(f"[INFO] Fetching {args.years} years of {args.ticker} + VIX data...")
+    features = fetch_training_data(ticker=args.ticker, years=args.years)
 
     train_regime_model(
         features=features,
         save_path=args.save_path,
         n_states=args.states,
+        ticker=args.ticker,
     )
 
 
