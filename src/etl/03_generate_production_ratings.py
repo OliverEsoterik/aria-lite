@@ -161,35 +161,47 @@ def calculate_momentum_metrics(engine, tickers):
         group['returns'] = group['price_close'].pct_change()
         vol = yang_zhang_vol(group, period=len(group), min_periods=63, annualize=True).iloc[-1]
         
-        # B. PRICE POINTS (Now, 1m, 3m, 12m)
+        # B. PRICE POINTS (Now, 1m, 3m, 6m, 12m)
         p_now = group['price_close'].iloc[-1]
         p_1m = group['price_close'].iloc[-21]
         p_3m = group['price_close'].iloc[-63]
-        
-        # C. MOMENTUM SPEEDS
-        # 12-1 Institutional Momentum (Persistence)
-        if available_days >= 252:
-            p_12m = group['price_close'].iloc[-252]
-            mom_12m = (p_1m / p_12m) - 1
-        else:
-            mom_12m = (p_1m / group['price_close'].iloc[0]) - 1 # Fallback for WDC
+        p_6m = group['price_close'].iloc[-126] if available_days >= 126 else None
+        p_12m = group['price_close'].iloc[-252] if available_days >= 252 else None
 
-        # 3m Fast Momentum (The Spark)
-        mom_3m = (p_now / p_3m) - 1
+        # C. MOMENTUM SPEEDS — Multi-lookback composite (Tan, Roberts & Zohren 2023)
+        r_63 = (p_now / p_3m) - 1
+        if p_6m is not None and p_12m is not None:
+            r_126 = (p_now / p_6m) - 1
+            r_252 = (p_now / p_12m) - 1
+            mom_combined = 0.3 * r_63 + 0.3 * r_126 + 0.4 * r_252
+        elif p_6m is not None:
+            # < 252 days: 2-window composite
+            r_126 = (p_now / p_6m) - 1
+            mom_combined = 0.4 * r_63 + 0.6 * r_126
+        else:
+            # < 126 days: fall back to 3-month only
+            mom_combined = r_63
+
+        # 3m Fast Momentum (The Spark) — keep for acceleration
+        mom_3m = r_63
 
         # D. ELITE FACTORS
-        # 1. RISK-ADJUSTED (Standard Institutional)
-        adj_mom = mom_12m / (vol + 1e-6)
-        
+        # 1. RISK-ADJUSTED — using multi-lookback composite (Tan, Roberts & Zohren 2023)
+        adj_mom = mom_combined / (vol + 1e-6)
+
         # 2. ACCELERATION (Freshness)
-        # Is the car speeding up? High accel = Fresh breakout.
-        acceleration = mom_3m - mom_12m
-        
-        # 3. MOMENTUM QUALITY (Quiet vs Loud)
-        # sign(Return) * [% Days Positive - % Days Negative]
-        pos_days = (group['returns'] > 0).sum()
-        neg_days = (group['returns'] < 0).sum()
-        inf_discr = np.sign(mom_12m) * (abs(pos_days - neg_days) / available_days)
+        # Compare 3m vs 12m window — accelerating = fresh breakout
+        r_12m = r_252 if p_12m is not None else mom_combined
+        acceleration = mom_3m - r_12m
+
+        # 3. MOMENTUM QUALITY (Quiet vs Loud) — exponentially weighted (Lee 2025)
+        # Alpha decays hyperbolically — recent days matter more
+        n = len(group['returns'])
+        decay = np.exp(-np.arange(n)[::-1] * np.log(2) / 63)
+        decay /= decay.sum()
+        pos_weight = ((group['returns'] > 0) * decay).sum()
+        neg_weight = ((group['returns'] < 0) * decay).sum()
+        inf_discr = np.sign(mom_combined) * (pos_weight - neg_weight)
 
         results.append({
             'ticker': ticker,
@@ -321,14 +333,25 @@ def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500):
         (final_merged['op_margin'].fillna(0).clip(0, 0.3) / 0.3 * 0.5)
     )
 
-    # --- Step G: FINAL ELITE SCORING ---
+    # --- Step G: FINAL ELITE SCORING — with non-linear alignment boost (P4) ---
+    # When short-term acceleration and risk-adjusted momentum agree,
+    # boost the momentum weight block (Liu, Shu & Chiu 2023)
+    z_mom = final_merged['z_mom_risk_adj']
+    z_accel = final_merged['z_accel']
+
+    alignment_boost = pd.Series(1.0, index=final_merged.index)
+    mask = (z_mom > 0) & (z_accel > 0)
+    alignment_boost[mask] = 1.0 + 0.3 * np.clip(
+        z_accel[mask].abs() / (z_mom[mask].abs() + 1e-6), 0, 1.0
+    )
+
     final_merged['final_score'] = (
-        final_merged['z_mom_risk_adj'] * 0.25 + # Core Momentum
-        final_merged['z_mom_qual']     * 0.25 + # Smoothness/Persistence
-        final_merged['z_accel']        * 0.05 + # Short-term momentum
-        final_merged['s_qual']         * 0.30 + # Revenue Growth + Op Margins etc
-        final_merged['z_eps']          * 0.10 + # Analyst Revisions
-        final_merged['z_state']        * 0.05   # Technical State (RSI/Vol)
+        final_merged['z_mom_risk_adj'] * 0.25 * alignment_boost +  # Core Momentum
+        final_merged['z_mom_qual']     * 0.25 * alignment_boost +  # Smoothness/Persistence
+        final_merged['z_accel']        * 0.05 +                    # Short-term momentum
+        final_merged['s_qual']         * 0.30 * (2.0 - alignment_boost) +  # Revenue Growth + Op Margins
+        final_merged['z_eps']          * 0.10 +                    # Analyst Revisions
+        final_merged['z_state']        * 0.05                      # Technical State (RSI/Vol)
     )
 
     gate = RiskGate()
