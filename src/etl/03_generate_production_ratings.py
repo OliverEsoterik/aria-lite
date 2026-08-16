@@ -83,11 +83,68 @@ def get_extensive_fundamentals(ticker):
     except Exception:
         return {'ticker': ticker, 'peg': 99.0, 'eps_rev': 0.0, 'current_price': 0, 'fcf_yield': 0.0}
 
+def yang_zhang_vol(df, period=None, min_periods=10, annualize=True):
+    """
+    Yang-Zhang range-based volatility estimator.
+
+    Combines overnight variance, open-close variance, and the Rogers-Satchell
+    high-low range estimator for 7-8x more efficient estimation than
+    close-to-close (Yang & Zhang, 2000).
+
+    Parameters
+    ----------
+    df : DataFrame
+        Must have columns: price_open, price_high, price_low, price_close.
+    period : int, optional
+        Rolling window size. If None, uses the full series length.
+    min_periods : int
+        Minimum periods for rolling calc (default 10).
+    annualize : bool
+        Multiply by sqrt(252) if True.
+
+    Returns
+    -------
+    Series : Yang-Zhang volatility estimates (annualized by default).
+    """
+    if period is None:
+        period = len(df)
+
+    # Overnight return: ln(Open_t / Close_{t-1})
+    log_oc = np.log(df['price_open'] / df['price_close'].shift(1))
+    # Intraday return: ln(Close_t / Open_t)
+    log_co = np.log(df['price_close'] / df['price_open'])
+
+    # Rogers-Satchell component using high/low range
+    log_ho = np.log(df['price_high'] / df['price_open'])
+    log_lo = np.log(df['price_low'] / df['price_open'])
+    log_hc = np.log(df['price_high'] / df['price_close'])
+    log_lc = np.log(df['price_low'] / df['price_close'])
+    rs = log_ho * log_hc + log_lo * log_lc
+
+    # Rolling variances
+    o_var = log_oc.rolling(period, min_periods=min_periods).var()
+    c_var = log_co.rolling(period, min_periods=min_periods).var()
+    rs_mean = rs.rolling(period, min_periods=min_periods).mean()
+
+    # Optimal weighting parameter k (Yang & Zhang, 2000, eq. 15)
+    k = 0.34 / (1.34 + (period + 1) / (period - 1))
+
+    # Yang-Zhang variance
+    yz_var = o_var + k * c_var + (1 - k) * rs_mean
+    yz_var = yz_var.clip(lower=0)  # clamp numerical negatives
+
+    vol = np.sqrt(yz_var)
+    if annualize:
+        vol = vol * np.sqrt(252)
+    return vol
+
+
 def calculate_momentum_metrics(engine, tickers):
     if not tickers: return pd.DataFrame()
     
     query = text("""
-        SELECT ticker, price_close, timestamp FROM market_prices 
+        SELECT ticker, price_open, price_high, price_low, price_close, timestamp
+        FROM market_prices
         WHERE ticker IN :tickers AND timestamp >= NOW() - INTERVAL '400 days'
         ORDER BY ticker, timestamp ASC
     """)
@@ -100,9 +157,9 @@ def calculate_momentum_metrics(engine, tickers):
         available_days = len(group)
         if available_days < 63: continue 
         
-        # A. VOLATILITY & RETURNS
+        # A. VOLATILITY & RETURNS (Yang-Zhang range-based estimator, 7-8x more efficient)
         group['returns'] = group['price_close'].pct_change()
-        vol = group['returns'].std() * np.sqrt(252) # Annualized Vol
+        vol = yang_zhang_vol(group, period=len(group), min_periods=63, annualize=True).iloc[-1]
         
         # B. PRICE POINTS (Now, 1m, 3m, 12m)
         p_now = group['price_close'].iloc[-1]
