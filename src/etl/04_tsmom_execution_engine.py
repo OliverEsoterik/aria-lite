@@ -105,12 +105,25 @@ class TSMOMExecutionEngine:
             }
         )
 
-        # Volatility-targeted raw weights
-        raw_weights = (self.target_annual_volatility / annualised_vol) * trend
-        raw_weights = raw_weights.fillna(0.0)
+        # Volatility-targeted weights — two-step approach per Moskowitz et al. (2012)
+        # Step 1: vol-equalize among trending stocks (relative weights)
+        # Step 2: scale total deployment by target_vol / avg_vol_of_trending_stocks
+        trending = [t for t in prices.columns if trend[t] == 1]
+        target_weights = pd.Series(0.0, index=prices.columns)
 
-        total = raw_weights.sum()
-        target_weights = raw_weights / total if total > 0 else pd.Series(0.0, index=prices.columns)
+        if trending:
+            # Step 1: relative weights based on inverse vol
+            inv_vol = 1.0 / annualised_vol[trending]
+            rel_weights = inv_vol / inv_vol.sum()
+
+            # Step 2: deployment = target_vol / weighted average vol of trending stocks
+            avg_vol = (rel_weights * annualised_vol[trending]).sum()
+            deployment = self.target_annual_volatility / avg_vol
+
+            for ticker in trending:
+                target_weights[ticker] = rel_weights[ticker] * deployment
+
+        target_weights = target_weights.fillna(0.0)
 
         # Order generation
         records = []
@@ -227,36 +240,93 @@ def load_weights(tickers: List[str], weights_file: Optional[str] = None) -> Dict
     return {t: float(raw.get(t, 0.0)) for t in tickers}
 
 
-def print_orders(orders: pd.DataFrame) -> None:
+def load_positions(positions_file: str) -> Dict[str, float]:
+    """
+    Load current portfolio positions from a JSON file.
+
+    Format: {"TICKER": euro_amount, ...}
+        - euro_amount must be >= 0.0 (zero means "not held")
+        - Negative values raise SystemExit
+
+    Returns {ticker: absolute_amount}.
+    """
+    if not os.path.exists(positions_file):
+        sys.exit(f"[ERROR] Positions file not found: {positions_file}")
+
+    try:
+        with open(positions_file) as f:
+            raw = json.load(f)
+    except json.JSONDecodeError as exc:
+        sys.exit(f"[ERROR] Invalid JSON in positions file: {exc}")
+
+    if not isinstance(raw, dict):
+        sys.exit("[ERROR] Positions file must contain a JSON object (dict).")
+
+    for ticker, amount in raw.items():
+        try:
+            amount = float(amount)
+        except (ValueError, TypeError):
+            sys.exit(f"[ERROR] Invalid position for {ticker}: expected a number, got {type(amount).__name__}")
+        if amount < 0:
+            sys.exit(f"[ERROR] Negative position for {ticker}: {amount}")
+
+    return {str(ticker).upper(): float(amount) for ticker, amount in raw.items()}
+
+
+def print_orders(orders: pd.DataFrame, total_value: Optional[float] = None, vol_target: Optional[float] = None) -> None:
     """
     Print the full portfolio position table.
 
-    Expects the full (unfiltered) DataFrame from calculate_orders(actionable_only=False).
-    Sorted: SELL → BUY → REBALANCE → HOLD.
+    If total_value is provided, EUR amounts are shown alongside percentages.
     """
     n_sell      = (orders["Action"] == "SELL").sum()
     n_buy       = (orders["Action"] == "BUY").sum()
     n_rebalance = (orders["Action"] == "REBALANCE").sum()
     n_hold      = (orders["Action"] == "HOLD").sum()
 
-    print(f"\n{'=' * 66}")
+    has_eur = total_value is not None and total_value > 0
+
+    print(f"\n{'=' * 80}")
     print(f"  TSMOM EXECUTION ENGINE — {pd.Timestamp.today().date()}")
     print(f"  {len(orders)} tickers  |  "
-          f"{n_sell} SELL  {n_buy} BUY  {n_rebalance} REBALANCE  {n_hold} HOLD")
-    print("=" * 66)
-    print(f"  {'Ticker':<8} {'Curr%':>7} {'Tgt%':>7} {'Delta%':>8}  Action")
-    print("  " + "-" * 52)
+          f"{n_sell} SELL  {n_buy} BUY  {n_rebalance} REBALANCE  {n_hold} HOLD"
+          f"{'  |  Vol target: ' + str(round(vol_target * 100)) + '%' if vol_target else ''}")
+    if has_eur:
+        print(f"  Portfolio value: €{total_value:,.0f}")
+        total_target_pct = orders["Target_Weight"].sum() * 100
+        print(f"  Target allocation: {total_target_pct:.1f}% of capital  "
+              f"(cash: {max(0, 100 - total_target_pct):.1f}%)")
+    print("=" * 80)
+
+    if has_eur:
+        print(f"  {'Ticker':<8} {'Curr (€)':>12} {'Curr%':>7} {'Tgt (€)':>12} {'Tgt%':>7} {'Delta (€)':>12} {'Delta%':>8}  Action")
+        print("  " + "-" * 82)
+    else:
+        print(f"  {'Ticker':<8} {'Curr%':>7} {'Tgt%':>7} {'Delta%':>8}  Action")
+        print("  " + "-" * 52)
 
     for ticker, row in orders.iterrows():
-        curr  = f"{row['Current_Weight']*100:.2f}"
-        tgt   = f"{row['Target_Weight']*100:.2f}"
-        delta = f"{row['Weight_Delta']*100:+.2f}"
         action = row["Action"]
         marker = "  "
         if action == "SELL":      marker = "✖ "
         elif action == "BUY":     marker = "✚ "
         elif action == "REBALANCE": marker = "↕ "
-        print(f"{marker}{ticker:<8} {curr:>7} {tgt:>7} {delta:>8}  {action}")
+
+        if has_eur:
+            curr_eur  = row["Current_Weight"] * total_value
+            tgt_eur   = row["Target_Weight"] * total_value
+            delta_eur = row["Weight_Delta"] * total_value
+            curr_pct  = row["Current_Weight"] * 100
+            tgt_pct   = row["Target_Weight"] * 100
+            delta_pct = row["Weight_Delta"] * 100
+            print(f"{marker}{ticker:<8} {curr_eur:>12,.0f} {curr_pct:>6.2f}% "
+                  f"{tgt_eur:>12,.0f} {tgt_pct:>6.2f}% "
+                  f"{delta_eur:>+12,.0f} {delta_pct:>+7.2f}%  {action}")
+        else:
+            curr  = f"{row['Current_Weight']*100:.2f}"
+            tgt   = f"{row['Target_Weight']*100:.2f}"
+            delta = f"{row['Weight_Delta']*100:+.2f}"
+            print(f"{marker}{ticker:<8} {curr:>7} {tgt:>7} {delta:>8}  {action}")
 
     print()
 
@@ -272,10 +342,30 @@ def main() -> None:
         help="JSON file mapping ticker→current decimal weight. "
              "Omit to use equal-weight across all portfolio tickers.",
     )
+    parser.add_argument(
+        "--volatility-target",
+        type=float,
+        default=1.0,
+        help="Portfolio volatility target (decimal). Default 1.0 (100%%) — deploy near-full capital. "
+             "Lower values reserve more cash. Affects concentration: higher = more weight on low-vol stocks.",
+    )
+    parser.add_argument(
+        "--positions-file",
+        metavar="PATH",
+        default=None,
+        help="JSON file mapping ticker→current EUR amount (e.g. {\"NVDA\": 10000}). "
+             "Overrides --weights-file if both are given.",
+    )
     args = parser.parse_args()
 
     # Deduplicate portfolio tickers (CURRENT_PORTFOLIO has duplicates)
-    tickers = list(dict.fromkeys(CURRENT_PORTFOLIO))
+    raw_positions: Optional[Dict[str, float]] = None
+    if args.positions_file is not None:
+        # When a positions file is given, evaluate only those tickers
+        raw_positions = load_positions(args.positions_file)
+        tickers = list(dict.fromkeys(raw_positions.keys()))
+    else:
+        tickers = list(dict.fromkeys(CURRENT_PORTFOLIO))
 
     print(f"[INFO] Fetching price history for {len(tickers)} tickers...")
     db_engine = create_engine(DB_URL, pool_size=5, max_overflow=10)
@@ -284,8 +374,31 @@ def main() -> None:
     if prices.empty:
         sys.exit("[ERROR] No price data returned from DB. Is the database running?")
 
-    # Load weights BEFORE filtering so we can detect held-but-dropped tickers
-    all_tickers_weights = load_weights(list(prices.columns), args.weights_file)
+    # ------------------------------------------------------------
+    # Load current holdings: positions file, weights file, or equal-weight
+    # ------------------------------------------------------------
+    total_portfolio_value: Optional[float] = None
+
+    if args.positions_file is not None:
+        # raw_positions already loaded above; compute total and convert to weights
+        total_portfolio_value = sum(raw_positions.values())
+
+        if total_portfolio_value <= 0:
+            sys.exit("[ERROR] Total portfolio value must be > 0 in positions file.")
+
+        # Build weight dict for ALL price-available tickers (before filtering)
+        all_tickers_weights = {
+            t: raw_positions.get(t, 0.0) / total_portfolio_value
+            for t in prices.columns
+        }
+        print(f"[INFO] Loaded positions for {len(raw_positions)} ticker(s), "
+              f"total portfolio value = \u20ac{total_portfolio_value:,.0f}")
+
+        if args.weights_file is not None:
+            print("[INFO] --positions-file takes precedence; ignoring --weights-file.")
+    else:
+        # Fall back to existing weights-file or equal-weight
+        all_tickers_weights = load_weights(list(prices.columns), args.weights_file)
 
     # Drop tickers with insufficient data (< 252 rows after pivot)
     valid_tickers = [t for t in prices.columns if prices[t].notna().sum() >= 252]
@@ -303,15 +416,18 @@ def main() -> None:
         if w > 0.0:
             print(f"[WARN] {ticker}: held (weight={w:.4f}) but insufficient price history — no SELL generated", file=sys.stderr)
 
-    current_weights = load_weights(valid_tickers, args.weights_file)
+    if args.positions_file is not None:
+        current_weights = {t: raw_positions.get(t, 0.0) / total_portfolio_value for t in valid_tickers}
+    else:
+        current_weights = load_weights(valid_tickers, args.weights_file)
 
-    eng = TSMOMExecutionEngine()
+    eng = TSMOMExecutionEngine(target_annual_volatility=args.volatility_target)
     try:
         orders = eng.calculate_orders(prices, current_weights, actionable_only=False)
     except ValueError as exc:
         sys.exit(f"[ERROR] {exc}")
 
-    print_orders(orders)
+    print_orders(orders, total_value=total_portfolio_value, vol_target=args.volatility_target)
 
 
 if __name__ == "__main__":

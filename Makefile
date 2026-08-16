@@ -1,4 +1,4 @@
-.PHONY: setup start-db stop-db stop status migrate run ratings tsmom tsmom-weights clean \
+.PHONY: setup start-db stop-db stop status migrate run ratings tsmom tsmom-weights tsmom-positions clean \
 	hmm-train-regime hmm-predict-regime hmm-train-trend hmm-train-trend-all \
 	hmm-predict-trend hmm-predict-trend-all
 
@@ -72,6 +72,11 @@ tsmom-weights: start-db
 	@echo "Running TSMOM Execution Engine with weights file..."
 	cd src/etl && python3 04_tsmom_execution_engine.py --weights-file ../../$(WEIGHTS_FILE)
 
+tsmom-positions: start-db
+	@test -n "$(POSITIONS_FILE)" || (echo "[ERROR] Usage: make tsmom-positions POSITIONS_FILE=path/to/positions.json [VOLATILITY_TARGET=1]" && exit 1)
+	@echo "Running TSMOM Execution Engine with positions file..."
+	cd src/etl && python3 04_tsmom_execution_engine.py --positions-file ../../$(POSITIONS_FILE) $(if $(VOLATILITY_TARGET),--volatility-target $(VOLATILITY_TARGET),)
+
 tsmom-rank: start-db
 	@echo "Ranking portfolio by TSMOM momentum strength..."
 	cd src/etl && python3 05_tsmom_momentum_ranker.py $(ARGS)
@@ -97,11 +102,29 @@ HMM_TREND_DIR    ?= $(HMM_DATA_DIR)/hmm_trend_params
 
 hmm-train-regime:
 	@mkdir -p $(HMM_DATA_DIR)
-	python3 src/hmm/train_regime.py --save-path $(HMM_REGIME_PARAMS)
+	@if [ -n "$(TICKER)" ]; then \
+		lower=$$(echo $(TICKER) | tr '[:upper:]' '[:lower:]'); \
+		path=$${SAVE_PATH:-$(HMM_DATA_DIR)/hmm_regime_params_$$lower.pkl}; \
+		echo ">>> Training regime model for $(TICKER)..."; \
+		python3 src/hmm/train_regime.py --ticker $(TICKER) --save-path $$path; \
+	else \
+		for t in SPY SOX NDX; do \
+			lower=$$(echo $$t | tr '[:upper:]' '[:lower:]'); \
+			echo ">>> Training regime model for $$t..."; \
+			python3 src/hmm/train_regime.py --ticker $$t --save-path $(HMM_DATA_DIR)/hmm_regime_params_$$lower.pkl; \
+		done; \
+	fi
 
 hmm-predict-regime:
-	@test -f $(HMM_REGIME_PARAMS) || (echo "[ERROR] No trained model at $(HMM_REGIME_PARAMS). Run 'make hmm-train-regime' first." && exit 1)
-	python3 src/hmm/predict_regime.py --params-path $(HMM_REGIME_PARAMS)
+	@if [ -n "$(TICKER)" ]; then \
+		lower=$$(echo $(TICKER) | tr '[:upper:]' '[:lower:]'); \
+		if [ ! -f "$(HMM_DATA_DIR)/hmm_regime_params_$$lower.pkl" ]; then \
+			echo "[ERROR] No trained model for $(TICKER). Run 'make hmm-train-regime TICKER=$(TICKER)' first." && exit 1; \
+		fi; \
+		python3 src/hmm/predict_regime.py --ticker $(TICKER) --params-path $(HMM_DATA_DIR)/hmm_regime_params_$$lower.pkl; \
+	else \
+		python3 src/hmm/predict_regime.py; \
+	fi
 
 hmm-train-trend:
 	@test -n "$(TICKERS)" || (echo "[ERROR] Usage: make hmm-train-trend TICKERS=\"NVDA AMD\"" && exit 1)

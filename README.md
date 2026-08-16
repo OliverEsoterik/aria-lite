@@ -45,6 +45,7 @@ We use a `Makefile` to orchestrate local development tasks cleanly. Once inside 
 * `make run`: The standard command to run your daily scripts. It ensures the database is running in the background and executes the ETL pipeline.
 * `make ratings`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
 * `make tsmom`: Runs the TSMOM Execution Engine against your current portfolio, printing a full position table with recommended actions.
+* `make tsmom-positions POSITIONS_FILE=path/to/positions.json [VOLATILITY_TARGET=1]`: Reads your current holdings as **absolute EUR amounts** (`{"NVDA": 10000, "MSFT": 8000}`) and computes target allocations. Set `VOLATILITY_TARGET=1` (default for fully-invested portfolios) to deploy near-full capital. Lower values (e.g. `0.15`) reserve more cash.
 * `make tsmom-weights WEIGHTS_FILE=path/to/weights.json`: Same as above, but reads your actual position weights from a JSON file (`{"NVDA": 0.08, "MSFT": 0.05, ...}`) instead of assuming equal weight.
 * `make tsmom-rank`: Ranks tickers by multi-window TSMOM composite (Composite > 0, Hurst et al. 2017).
 * `make tsmom-rank-all`: Includes off-trend tickers in the ranking (useful for spotting tickers near flipping on).
@@ -103,6 +104,16 @@ For each ticker in `CURRENT_PORTFOLIO` it computes a price-only trend signal and
 | **SELL** | Trend breaks and you currently hold the position — exit |
 
 > **Note:** `BUY` only fires when you pass real position weights via `--weights-file` and a ticker has weight `0`. With the default equal-weight mode every ticker is treated as held, so only `SELL`, `REBALANCE`, and `HOLD` appear.
+>
+> **EUR positions mode:** Run via `make tsmom-positions POSITIONS_FILE=path/to/positions.json` or directly with `--positions-file`. Supply your current holdings as absolute amounts (e.g. `{"NVDA": 10000, "MSFT": 8000}`). The engine:
+> 1. Sums the amounts to get your total portfolio value
+> 2. Converts to weights internally (each amount / total)
+> 3. Computes target weights from TSMOM
+> 4. Prints both EUR amounts and percentages in the output table
+>
+> This is the recommended way to run the engine — you see exactly how much to buy or sell in cash terms, not just percentage deltas.
+
+**Volatility target:** `VOLATILITY_TARGET` controls how much capital the model wants to deploy. Default is `0.15` (15%), which typically results in a low allocation (mostly cash). Set `VOLATILITY_TARGET=1` (100%) to deploy near-full capital, which is the right setting if you're always fully invested. The target acts as a concentration dial: lower values flatten toward equal-weight, higher values skew more heavily toward lower-volatility stocks.
 
 **Trend signal (price-only):** `T_i = 1` if `Price > SMA_210` AND `12-month return > 0`, else `0`.
 
@@ -205,6 +216,18 @@ in {
 ```
 
 **Note:** This setup requires that your system's PostgreSQL has the `timescaledb` extension enabled and a database named `alphapicks` created.
+
+---
+
+## 📚 Research References
+
+This project implements or is directly inspired by the following academic papers. Each reference links to the specific code that implements it.
+
+| Paper | Implemented In | What It Provides |
+|-------|---------------|------------------|
+| **Moskowitz, Ooi & Pedersen (2012)** — "Time Series Momentum" ([SSRN](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2089463)) | [`04_tsmom_execution_engine.py`](src/etl/04_tsmom_execution_engine.py) | Volatility-scaling of momentum returns, inverse-vol weighting, and the two-step vol-targeting framework. The trend signal (`P > SMA_210` + `R_252 > 0`) and the exh-ante EWMA vol estimator are drawn directly from this paper. |
+| **Hurst, Ooi & Pedersen (2017)** — "A Century of Evidence on Trend-Following Investing" ([SSRN](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2993026)) | [`05_tsmom_momentum_ranker.py`](src/etl/05_tsmom_momentum_ranker.py) | Multi-window momentum composite: the equal-weighted combination of 21-day, 63-day, and 252-day vol-scaled returns. The hysteresis deadband in the execution engine also follows this paper's turnover-control recommendations. |
+| **Rabiner (1989)** — "A Tutorial on Hidden Markov Models and Selected Applications in Speech Recognition" ([IEEE](https://ieeexplore.ieee.org/document/18626)) | [`src/hmm/`](src/hmm/) (all four modules) | Gaussian HMM training via Baum-Welch (expectation-maximisation) and state prediction via the Viterbi algorithm. The 3-state regime detector and 4-state trend quality models are standard Rabiner-style HMMs applied to financial returns. |
 
 ---
 

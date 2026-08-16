@@ -19,6 +19,16 @@ import pandas as pd
 import yfinance as yf
 
 
+# Ticker mapping: short name -> yfinance symbol
+TICKER_MAP = {
+    "SPY": "SPY",
+    "SOX": "^SOX",
+    "NDX": "^NDX",
+}
+
+ALL_TICKERS = ["SPY", "SOX", "NDX"]
+
+
 # Portfolio guidance templates per regime
 _GUIDANCE = {
     "BULL": {
@@ -45,31 +55,38 @@ _GUIDANCE = {
 }
 
 
-def fetch_recent_data(lookback_days: int = 60) -> np.ndarray:
-    """Fetch recent SPY + VIX data for prediction.
+def fetch_recent_data(ticker: str = "SPY", lookback_days: int = 60) -> np.ndarray:
+    """Fetch recent index + VIX data for prediction.
+
+    Args:
+        ticker: Index ticker (SPY, SOX, or NDX).
+        lookback_days: Number of recent trading days to use.
 
     Returns:
         Array of shape (lookback_days, 2) with [log_return, vix_close].
     """
+    yf_ticker = TICKER_MAP[ticker]
+    name_lower = ticker.lower()
+
     end = datetime.now()
     start = end - timedelta(days=max(1, lookback_days * 2))
 
-    spy = yf.download("SPY", start=start, end=end, progress=False)
+    index_data = yf.download(yf_ticker, start=start, end=end, progress=False)
     vix = yf.download("^VIX", start=start, end=end, progress=False)
 
-    if spy.empty or vix.empty:
-        raise ValueError("Failed to fetch recent SPY or VIX data")
+    if index_data.empty or vix.empty:
+        raise ValueError(f"Failed to fetch recent {ticker} or VIX data")
 
-    df = pd.DataFrame(index=spy.index)
-    df["spy_close"] = spy["Close"]
+    df = pd.DataFrame(index=index_data.index)
+    df[f"{name_lower}_close"] = index_data["Close"]
     df["vix_close"] = vix["Close"]
     df = df.dropna()
-    df["spy_return"] = np.log(df["spy_close"] / df["spy_close"].shift(1))
+    df[f"{name_lower}_return"] = np.log(df[f"{name_lower}_close"] / df[f"{name_lower}_close"].shift(1))
     df = df.dropna()
 
     # Take the most recent `lookback_days` days
     recent = df.tail(lookback_days)
-    return recent[["spy_return", "vix_close"]].values
+    return recent[[f"{name_lower}_return", "vix_close"]].values
 
 
 def _regularize_transmat(transmat: np.ndarray, max_self: float = 0.99) -> np.ndarray:
@@ -129,6 +146,7 @@ def predict_regime(
     lookback_days: int = 60,
     recent_observations: Optional[np.ndarray] = None,
     forecast_horizons: list[int] = None,
+    ticker: str = "SPY",
 ) -> dict:
     """Predict current market regime using a trained HMM.
 
@@ -137,15 +155,19 @@ def predict_regime(
         lookback_days: Number of recent trading days to use.
         recent_observations: Optional pre-computed features (n_days, 2).
             If None, fetches from yfinance.
+        forecast_horizons: List of forecast horizons in trading days.
+        ticker: Index ticker (SPY, SOX, or NDX).
 
     Returns:
         Dict with:
+            ticker: str
             state: str (BULL/BEAR/SIDEWAYS)
             confidence: float
             probabilities: list[float] (one per state)
             persistence: float (self-transition prob)
             state_labels: list[str]
             guidance: dict (regime-specific guidance)
+            forecast: dict[int, list[float]]
     """
     params_path_obj = Path(params_path)
     if not params_path_obj.exists():
@@ -159,7 +181,7 @@ def predict_regime(
     state_labels = params["state_labels"]
 
     if recent_observations is None:
-        recent_observations = fetch_recent_data(lookback_days=lookback_days)
+        recent_observations = fetch_recent_data(ticker=ticker, lookback_days=lookback_days)
 
     # Ensure we have enough data
     if len(recent_observations) < 10:
@@ -173,9 +195,13 @@ def predict_regime(
     # Use the last timestep's probabilities as current state estimate
     current_probs = state_probs[-1]
 
-    # Viterbi: most likely state sequence
-    hidden_states = model.predict(scaled)
-    current_state_idx = hidden_states[-1]
+    # Use the marginal posterior (forward-backward) for the current state.
+    # Viterbi (model.predict) finds the most likely global path, which can
+    # disagree with the marginal at a single timestep — especially during
+    # regime transitions where high self-transition probabilities make
+    # the global path slow to react. For point-in-time regime classification
+    # the marginal posterior is the correct answer.
+    current_state_idx = int(np.argmax(current_probs))
 
     # State label and confidence
     state_label = state_labels[current_state_idx]
@@ -191,6 +217,7 @@ def predict_regime(
     forecast = compute_forecast(model, current_probs, forecast_horizons)
 
     return {
+        "ticker": ticker,
         "state": state_label,
         "confidence": round(confidence, 4),
         "probabilities": [round(float(p), 4) for p in current_probs],
@@ -203,6 +230,7 @@ def predict_regime(
 
 def print_report(result: dict) -> None:
     """Print the regime report to stdout."""
+    ticker = result.get("ticker", "SPY")
     state = result["state"]
     conf = result["confidence"] * 100
     probs = result["probabilities"]
@@ -222,7 +250,7 @@ def print_report(result: dict) -> None:
 
     print()
     print(f"{'=' * 55}")
-    print(f"  HMM Regime Report  —  {datetime.now().strftime('%Y-%m-%d')}")
+    print(f"  HMM Regime Report ({ticker})  —  {datetime.now().strftime('%Y-%m-%d')}")
     print(f"{'=' * 55}")
     print()
     print(f"  Regime:  {state} ({conf:.0f}% confidence)")
@@ -250,12 +278,65 @@ def print_report(result: dict) -> None:
     print()
 
 
+def _default_params_path(ticker: str) -> str:
+    """Default save path for a given ticker."""
+    return f"data/hmm_regime_params_{ticker.lower()}.pkl"
+
+
+def print_comparison_report(results: list[dict]) -> None:
+    """Print a side-by-side comparison of all regime results."""
+    print()
+    print(f"{'=' * 60}")
+    print(f"  HMM Regime Comparison  —  {datetime.now().strftime('%Y-%m-%d')}")
+    print(f"{'=' * 60}")
+    print()
+    print(f"  {'Index':<8} {'Regime':<12} {'Conf':<8} {'30d Fcast':<24} {'Persist':<8}")
+    print(f"  {'─' * 8} {'─' * 12} {'─' * 8} {'─' * 24} {'─' * 8}")
+
+    divergence = []
+    for r in results:
+        ticker = r["ticker"]
+        state = r["state"]
+        conf = f"{r['confidence']*100:.0f}%"
+        labels = r["state_labels"]
+        f30 = r["forecast"].get(30, [])
+        f30_str = " ".join(
+            f"{labels[i]}{f30[i]*100:.0f}%"
+            for i in range(min(len(labels), len(f30)))
+        )
+        persist = f"{r['persistence']*100:.0f}%"
+        print(f"  {ticker:<8} {state:<12} {conf:<8} {f30_str:<24} {persist:<8}")
+        divergence.append(state)
+
+    print()
+
+    # Heuristic: flag if SPY and SOX disagree
+    if len(results) >= 2:
+        spy_state = next((r["state"] for r in results if r["ticker"] == "SPY"), None)
+        sox_state = next((r["state"] for r in results if r["ticker"] == "SOX"), None)
+        ndx_state = next((r["state"] for r in results if r["ticker"] == "NDX"), None)
+
+        if spy_state and sox_state:
+            if spy_state == sox_state:
+                print(f"  ✓ SPY and SOX agree — {spy_state}. Full conviction.")
+            else:
+                print(f"  ⚠ SPY={spy_state} vs SOX={sox_state} — semi cycle diverging from broad market.")
+        if spy_state and ndx_state and spy_state != ndx_state:
+            print(f"  ⚠ SPY={spy_state} vs NDX={ndx_state} — tech/growth telling a different story.")
+
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Predict current market regime from trained HMM"
     )
     parser.add_argument(
-        "--params-path", default="data/hmm_regime_params.pkl",
+        "--ticker", default=None, choices=list(TICKER_MAP.keys()),
+        help="Index ticker to predict (default: show all)"
+    )
+    parser.add_argument(
+        "--params-path", default=None,
         help="Path to trained model parameters"
     )
     parser.add_argument(
@@ -265,11 +346,36 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        result = predict_regime(
-            params_path=args.params_path,
-            lookback_days=args.lookback,
-        )
-        print_report(result)
+        if args.ticker:
+            # Single ticker mode
+            params_path = args.params_path or _default_params_path(args.ticker)
+            result = predict_regime(
+                params_path=params_path,
+                lookback_days=args.lookback,
+                ticker=args.ticker,
+            )
+            print_report(result)
+        else:
+            # All tickers mode
+            results = []
+            for ticker in ALL_TICKERS:
+                params_path = _default_params_path(ticker)
+                if not Path(params_path).exists():
+                    print(f"[SKIP] {ticker} — no model at {params_path}. Run 'make hmm-train-regime' first.")
+                    continue
+                result = predict_regime(
+                    params_path=params_path,
+                    lookback_days=args.lookback,
+                    ticker=ticker,
+                )
+                results.append(result)
+            if not results:
+                print("[ERROR] No trained models found. Run 'make hmm-train-regime' first.", file=sys.stderr)
+                sys.exit(1)
+            print_comparison_report(results)
+            # Also print detailed report for each
+            for r in results:
+                print_report(r)
     except (FileNotFoundError, ValueError) as e:
         print(f"[ERROR] {e}", file=sys.stderr)
         sys.exit(1)
