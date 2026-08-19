@@ -41,8 +41,8 @@ make run
 
 We use a `Makefile` to orchestrate local development tasks cleanly. Once inside `nix develop`, you have access to the following commands:
 
-* `make setup`: **(First-time only)** Initializes the database cluster, installs the TimescaleDB extension, applies SQL schema (`sql/01_init_schema.sql`), and executes the full ETL pipeline including entity population (`scripts/run_etl.sh`).
-* `make run`: The standard command to run your daily scripts. It ensures the database is running in the background and executes the ETL pipeline.
+* `make setup`: **(First-time only)** Initializes the database cluster, installs the TimescaleDB extension, applies SQL schema (`sql/01_init_schema.sql`), and executes the full ETL pipeline including entity population (`scripts/run_etl.sh`). Optionally limit tickers: `make setup MAX=100`.
+* `make run`: The standard command to run your daily scripts. It ensures the database is running in the background and executes the ETL pipeline. Optionally limit tickers: `make run MAX=100`.
 * `make ratings`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
 * `make tsmom`: Runs the TSMOM Execution Engine against your current portfolio, printing a full position table with recommended actions.
 * `make tsmom-positions POSITIONS_FILE=path/to/positions.json [VOLATILITY_TARGET=1]`: Reads your current holdings as **absolute EUR amounts** (`{"NVDA": 10000, "MSFT": 8000}`) and computes target allocations. Set `VOLATILITY_TARGET=1` (default for fully-invested portfolios) to deploy near-full capital. Lower values (e.g. `0.15`) reserve more cash.
