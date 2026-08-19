@@ -3,9 +3,10 @@
 	hmm-predict-trend hmm-predict-trend-all
 
 SEC_USER_AGENT_EMAIL ?= your.email@address.com
+MAX ?=
 
 setup: start-db migrate
-	SEC_USER_AGENT_EMAIL=$(SEC_USER_AGENT_EMAIL) ./scripts/run_etl.sh
+	SEC_USER_AGENT_EMAIL=$(SEC_USER_AGENT_EMAIL) ./scripts/run_etl.sh $(if $(MAX),--max $(MAX),)
 
 start-db:
 	@if [ ! -d "$(DB_PATH)" ]; then \
@@ -53,7 +54,7 @@ migrate: start-db
 
 run: start-db
 	@echo "Running daily services..."
-	./scripts/run_etl.sh --skip-entities
+	./scripts/run_etl.sh --skip-entities $(if $(MAX),--max $(MAX),)
 
 statistics: start-db
 	@echo "Computing statistics..."
