@@ -1,37 +1,40 @@
 import pandas as pd
 import yfinance as yf
-import json, os, time
+import os, time, argparse
 import psycopg2.extras
 from typing import List, Dict, Optional
 from sqlalchemy import create_engine, text
 
 # --- Configuration ---
 DB_CONN_STR = os.environ.get("DATABASE_URL", "postgresql+psycopg2:///alphapicks")
-TICKER_LIST_PATH = "../../data/tickers_to_trade.json"
 DEFAULT_START_DATE = (pd.Timestamp.today() - pd.DateOffset(years=10)).strftime('%Y-%m-%d')
 
-CHUNK_SIZE = 200 # Reduced chunk size for more reliable YF downloads
+CHUNK_SIZE = 200
 API_SLEEP_SECONDS = 0.7
 
-def load_tickers(file_path: str) -> List[str]:
-    if not os.path.exists(file_path): return []
-    with open(file_path, 'r') as f:
-        return [t.strip().upper() for t in json.load(f) if t]
+def load_tickers_from_db(engine, max_tickers: Optional[int] = None) -> List[Dict]:
+    """Fetch tickers from dim_entities ordered by market cap (entity_pk ASC).
 
-def get_ticker_map(engine, tickers: List[str]) -> Dict[str, int]:
-    # Process in sub-batches to avoid SQL string length limits
-    mapping = {}
-    batch_size = 500
-    for i in range(0, len(tickers), batch_size):
-        batch = tickers[i:i+batch_size]
-        query = text("SELECT ticker, entity_pk FROM dim_entities WHERE ticker = ANY(:tickers)")
-        with engine.connect() as conn:
-            result = conn.execute(query, {'tickers': batch})
-            for row in result:
-                mapping[row.ticker] = row.entity_pk
-    return mapping
+    Returns a list of dicts with keys: ticker, entity_pk.
+    If max_tickers is set, only the top N are returned.
+    """
+    query = "SELECT ticker, entity_pk FROM dim_entities ORDER BY entity_pk ASC"
+    params = {}
+    if max_tickers:
+        query += " LIMIT :max_tickers"
+        params = {"max_tickers": max_tickers}
 
-import time
+    with engine.connect() as conn:
+        result = conn.execute(text(query), params)
+        rows = [{"ticker": row.ticker, "entity_pk": row.entity_pk} for row in result]
+
+    if not rows:
+        print("   ! No tickers found in dim_entities. Run 00_populate_entities.py first.")
+        return []
+
+    print(f"   > Loaded {len(rows)} tickers from dim_entities" +
+          (f" (top {max_tickers})" if max_tickers else ""))
+    return rows
 
 def get_last_timestamps(engine, tickers: List[str]) -> Dict[str, str]:
     """
@@ -170,13 +173,29 @@ def fast_insert_market_prices(engine, df: pd.DataFrame, ticker_map: Dict[str, in
     with engine.begin() as conn:
         psycopg2.extras.execute_values(conn.connection.cursor(), insert_query, values)
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Fetch price data from yfinance")
+    parser.add_argument("--max", type=int, default=None,
+                        help="Maximum number of tickers to process (default: all)")
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     start_time = time.time()
-    tickers = load_tickers(TICKER_LIST_PATH)
-    engine = create_engine(DB_CONN_STR, pool_pre_ping=True) # Pool_pre_ping checks connection health
-    ticker_map = get_ticker_map(engine, tickers)
-    
-    valid_tickers = [t for t in tickers if t in ticker_map]
+
+    engine = create_engine(DB_CONN_STR, pool_pre_ping=True)
+
+    # Load tickers from DB instead of JSON file
+    ticker_rows = load_tickers_from_db(engine, max_tickers=args.max)
+    if not ticker_rows:
+        print(">>> No tickers to process. Exiting.")
+        return
+
+    # Build ticker_map from the query result (entity_pk already known)
+    ticker_map = {row["ticker"]: row["entity_pk"] for row in ticker_rows}
+    valid_tickers = list(ticker_map.keys())
+
     last_dates_map = get_last_timestamps(engine, valid_tickers)
 
     date_groups = {}
