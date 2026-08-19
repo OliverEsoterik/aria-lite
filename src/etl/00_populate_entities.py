@@ -49,9 +49,8 @@ def load_sec_data():
         sql = """
             INSERT INTO dim_entities (entity_identifier, ticker, company_name)
             VALUES (%s, %s, %s)
-            ON CONFLICT (entity_identifier) 
+            ON CONFLICT (entity_identifier, ticker) 
             DO UPDATE SET 
-                ticker = EXCLUDED.ticker,
                 company_name = EXCLUDED.company_name,
                 dw_loaded_at = CURRENT_TIMESTAMP;
         """

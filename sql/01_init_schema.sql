@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS dim_entities (
     entity_pk BIGSERIAL PRIMARY KEY,
-    entity_identifier TEXT NOT NULL UNIQUE, 
+    entity_identifier TEXT NOT NULL,
     ticker TEXT NOT NULL,
     company_name TEXT NOT NULL,
     state_of_incorporation TEXT, 
@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS dim_entities (
     sector TEXT, 
     industry TEXT, 
     first_filing_id TEXT,
-    dw_loaded_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    dw_loaded_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (entity_identifier, ticker)
 );
 
 CREATE TABLE IF NOT EXISTS market_prices (
