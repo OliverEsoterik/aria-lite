@@ -1,4 +1,4 @@
-.PHONY: setup start-db stop-db stop status migrate run ratings tsmom tsmom-weights tsmom-positions clean \
+.PHONY: setup start-db stop-db stop status migrate run update-sec-tickers update-eu-tickers ratings tsmom tsmom-weights tsmom-positions clean \
 	hmm-train-regime hmm-predict-regime hmm-train-trend hmm-train-trend-all \
 	hmm-predict-trend hmm-predict-trend-all
 
@@ -55,6 +55,19 @@ migrate: start-db
 run: start-db
 	@echo "Running daily services..."
 	./scripts/run_etl.sh --skip-entities $(if $(filter-out 0,$(MAX)),--max $(MAX),)
+
+update-sec-tickers: start-db
+	@echo "Updating SEC tickers..."
+	SEC_USER_AGENT_EMAIL=$(SEC_USER_AGENT_EMAIL) \
+		cd src/etl && python3 00_populate_entities.py
+
+update-eu-tickers: start-db
+	@test -n "$(EODHD_API_TOKEN)" || (echo "[ERROR] EODHD_API_TOKEN not set" && exit 1)
+	@echo "Updating European tickers from EODHD..."
+	SEC_USER_AGENT_EMAIL=$(SEC_USER_AGENT_EMAIL) \
+		EODHD_API_TOKEN=$(EODHD_API_TOKEN) \
+		cd src/etl && python3 00_populate_european_entities.py \
+		$(if $(EXCHANGES),--exchanges $(EXCHANGES),)
 
 statistics: start-db
 	@echo "Computing statistics..."
