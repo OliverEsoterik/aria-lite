@@ -43,6 +43,8 @@ We use a `Makefile` to orchestrate local development tasks cleanly. Once inside 
 
 * `make setup`: **(First-time only)** Initializes the database cluster, installs the TimescaleDB extension, applies SQL schema (`sql/01_init_schema.sql`), and executes the full ETL pipeline including entity population (`scripts/run_etl.sh`). Optionally limit tickers: `make setup MAX=100`.
 * `make run`: The standard command to run your daily scripts. It ensures the database is running in the background and executes the ETL pipeline. Optionally limit tickers: `make run MAX=100`.
+* `make update-sec-tickers`: Fetches US tickers from the SEC and upserts them into the `dim_entities` table. Run standalone — not needed if you use `make setup` or `make run`.
+* `make update-eu-tickers`: Fetches European tickers from the EODHD API (LSE, XETRA, Euronext, SIX, Borsa Italiana, Nasdaq Nordic, WSE, BME, Oslo Bors) and upserts them into `dim_entities` alongside US tickers. Requires `EODHD_API_TOKEN`. Optionally test with a single exchange: `make update-eu-tickers EODHD_API_TOKEN=xxx EXCHANGES=WAR`.
 * `make ratings`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
 * `make tsmom`: Runs the TSMOM Execution Engine against your current portfolio, printing a full position table with recommended actions.
 * `make tsmom-positions POSITIONS_FILE=path/to/positions.json [VOLATILITY_TARGET=1]`: Reads your current holdings as **absolute EUR amounts** (`{"NVDA": 10000, "MSFT": 8000}`) and computes target allocations. Set `VOLATILITY_TARGET=1` (default for fully-invested portfolios) to deploy near-full capital. Lower values (e.g. `0.15`) reserve more cash.
@@ -86,6 +88,8 @@ Upon running `nix develop`, the environment automatically sets up the following 
 * `PGHOST`: Path to your local `.db_data` socket directory
 * `PGPORT`: `5432`
 * `PROJECT_ROOT`: Absolute path to this repository
+* `SEC_USER_AGENT_EMAIL`: Required for SEC and EODHD API access. Set this to your email.
+* `EODHD_API_TOKEN`: Required for European ticker population. Sign up at [eodhd.com](https://eodhd.com/register) for a free API key.
 
 ### ETL Scripts
 Python scripts (`src/etl/01_fetch_price_data.py`, `src/etl/02_compute_statistics.py`, `src/etl/03_generate_production_ratings.py`) execute using the dependencies pinned in the Nix environment. Database connections intelligently read from the environment variables, meaning no hardcoded credentials are used.
