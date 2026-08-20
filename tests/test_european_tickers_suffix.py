@@ -18,44 +18,38 @@ class TestGetSuffix:
     def test_swiss(self):
         assert get_suffix("SW", "Switzerland") == ".SW"
 
-    def test_bit(self):
-        assert get_suffix("BIT", "Italy") == ".MI"
+    def test_stockholm(self):
+        assert get_suffix("ST", "Sweden") == ".ST"
 
-    def test_sto(self):
-        assert get_suffix("STO", "Sweden") == ".ST"
+    def test_helsinki(self):
+        assert get_suffix("HE", "Finland") == ".HE"
 
-    def test_hel(self):
-        assert get_suffix("HEL", "Finland") == ".HE"
+    def test_copenhagen(self):
+        assert get_suffix("CO", "Denmark") == ".CO"
 
-    def test_cph(self):
-        assert get_suffix("CPH", "Denmark") == ".CO"
+    def test_oslo(self):
+        assert get_suffix("OL", "Norway") == ".OL"
 
-    def test_osl(self):
-        assert get_suffix("OSL", "Norway") == ".OL"
-
-    def test_war(self):
+    def test_warsaw(self):
         assert get_suffix("WAR", "Poland") == ".WA"
 
-    def test_bme(self):
-        assert get_suffix("BME", "Spain") == ".MC"
+    def test_madrid(self):
+        assert get_suffix("MC", "Spain") == ".MC"
 
-    def test_ir(self):
+    def test_ireland(self):
         assert get_suffix("IR", "Ireland") == ".IR"
 
-    def test_euronext_france(self):
-        assert get_suffix("EURONEXT", "France") == ".PA"
+    def test_paris(self):
+        assert get_suffix("PA", "France") == ".PA"
 
-    def test_euronext_netherlands(self):
-        assert get_suffix("EURONEXT", "Netherlands") == ".AS"
+    def test_amsterdam(self):
+        assert get_suffix("AS", "Netherlands") == ".AS"
 
-    def test_euronext_belgium(self):
-        assert get_suffix("EURONEXT", "Belgium") == ".BR"
+    def test_brussels(self):
+        assert get_suffix("BR", "Belgium") == ".BR"
 
-    def test_euronext_portugal(self):
-        assert get_suffix("EURONEXT", "Portugal") == ".LS"
-
-    def test_euronext_unknown_country_defaults(self):
-        assert get_suffix("EURONEXT", "Unknown") == ".PA"
+    def test_lisbon(self):
+        assert get_suffix("LS", "Portugal") == ".LS"
 
     def test_unknown_exchange_returns_empty(self):
         assert get_suffix("UNKNOWN", "Somewhere") == ""

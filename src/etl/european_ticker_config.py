@@ -1,28 +1,25 @@
 """Exchange configuration for European ticker population.
 
 Maps EODHD exchange codes to yfinance-compatible suffixes.
-EURONEXT is multi-country, resolved by the Country field in API responses.
+Each exchange is listed individually with its country mapping.
 """
 
 EXCHANGE_CONFIG = [
     # (EODHD code, country -> suffix mapping, default suffix)
-    ("LSE",      {"UK": ".L"},                  ".L"),
-    ("XETRA",    {"Germany": ".DE"},             ".DE"),
-    ("SW",       {"Switzerland": ".SW"},          ".SW"),
-    ("BIT",      {"Italy": ".MI"},               ".MI"),
-    ("STO",      {"Sweden": ".ST"},              ".ST"),
-    ("HEL",      {"Finland": ".HE"},             ".HE"),
-    ("CPH",      {"Denmark": ".CO"},             ".CO"),
-    ("OSL",      {"Norway": ".OL"},              ".OL"),
-    ("WAR",      {"Poland": ".WA"},              ".WA"),
-    ("BME",      {"Spain": ".MC"},              ".MC"),
-    ("IR",       {"Ireland": ".IR"},             ".IR"),
-    ("EURONEXT", {
-        "France": ".PA",
-        "Netherlands": ".AS",
-        "Belgium": ".BR",
-        "Portugal": ".LS",
-    }, ".PA"),
+    ("LSE",      {"UK": ".L"},            ".L"),
+    ("XETRA",    {"Germany": ".DE"},       ".DE"),
+    ("SW",       {"Switzerland": ".SW"},    ".SW"),
+    ("ST",       {"Sweden": ".ST"},        ".ST"),
+    ("HE",       {"Finland": ".HE"},       ".HE"),
+    ("CO",       {"Denmark": ".CO"},       ".CO"),
+    ("OL",       {"Norway": ".OL"},        ".OL"),
+    ("WAR",      {"Poland": ".WA"},        ".WA"),
+    ("MC",       {"Spain": ".MC"},        ".MC"),
+    ("IR",       {"Ireland": ".IR"},       ".IR"),
+    ("PA",       {"France": ".PA"},        ".PA"),
+    ("AS",       {"Netherlands": ".AS"},    ".AS"),
+    ("BR",       {"Belgium": ".BR"},        ".BR"),
+    ("LS",       {"Portugal": ".LS"},       ".LS"),
 ]
 
 
