@@ -2,6 +2,7 @@ import requests
 import psycopg2
 import os
 import sys
+import time
 
 # --- CONFIGURATION ---
 EODHD_TOKEN = os.environ.get("EODHD_API_TOKEN")
@@ -9,41 +10,14 @@ if not EODHD_TOKEN:
     print("Error: EODHD_API_TOKEN environment variable not set.")
     sys.exit(1)
 
-HEADERS = {"User-Agent": os.environ.get("SEC_USER_AGENT_EMAIL", "")}
+SEC_USER_AGENT = os.environ.get("SEC_USER_AGENT_EMAIL")
+if not SEC_USER_AGENT:
+    print("Error: SEC_USER_AGENT_EMAIL environment variable not set.")
+    sys.exit(1)
+HEADERS = {"User-Agent": SEC_USER_AGENT}
 DB_URL = os.environ.get("DATABASE_URL", "postgresql:///alphapicks")
 
-# EODHD exchange code → yfinance suffix mapping
-# For EURONEXT, suffix depends on Country field
-EXCHANGE_CONFIG = [
-    # (EODHD code, country → suffix mapping, default suffix)
-    # Simple: one suffix per exchange
-    ("LSE",      {"UK": ".L"},                  ".L"),
-    ("XETRA",    {"Germany": ".DE"},             ".DE"),
-    ("SW",       {"Switzerland": ".SW"},          ".SW"),
-    ("BIT",      {"Italy": ".MI"},               ".MI"),
-    ("STO",      {"Sweden": ".ST"},              ".ST"),
-    ("HEL",      {"Finland": ".HE"},             ".HE"),
-    ("CPH",      {"Denmark": ".CO"},             ".CO"),
-    ("OSL",      {"Norway": ".OL"},              ".OL"),
-    ("WAR",      {"Poland": ".WA"},              ".WA"),
-    ("BME",      {"Spain": ".MC"},              ".MC"),
-    ("IR",       {"Ireland": ".IR"},             ".IR"),
-    # EURONEXT: multi-country, resolve by Country field
-    ("EURONEXT", {
-        "France": ".PA",
-        "Netherlands": ".AS",
-        "Belgium": ".BR",
-        "Portugal": ".LS",
-    }, ".PA"),  # default to Paris if country unknown
-]
-
-
-def get_suffix(exchange_code: str, country: str) -> str:
-    """Return the yfinance suffix for an exchange code + country."""
-    for code, country_map, default in EXCHANGE_CONFIG:
-        if code == exchange_code:
-            return country_map.get(country, default)
-    return ""  # unknown exchange, no suffix
+from european_ticker_config import EXCHANGE_CONFIG, get_suffix
 
 
 def fetch_exchange_symbols(exchange_code: str) -> list:
@@ -54,7 +28,7 @@ def fetch_exchange_symbols(exchange_code: str) -> list:
         "fmt": "json",
         "type": "common_stock",
     }
-    response = requests.get(url, headers=HEADERS, params=params)
+    response = requests.get(url, headers=HEADERS, params=params, timeout=30)
     response.raise_for_status()
     return response.json()
 
@@ -84,10 +58,19 @@ def load_european_data(exchange_filter: list = None):
 
         for exchange_code, country_map, default_suffix in exchanges_to_fetch:
             print(f"Fetching {exchange_code}...", end=" ", flush=True)
-            try:
-                symbols = fetch_exchange_symbols(exchange_code)
-            except requests.exceptions.RequestException as e:
-                print(f"FAILED: {e}")
+            symbols = None
+            for attempt in range(2):
+                try:
+                    symbols = fetch_exchange_symbols(exchange_code)
+                    break
+                except requests.exceptions.RequestException as e:
+                    if attempt == 0:
+                        print(f"retrying...", end=" ", flush=True)
+                        time.sleep(1)
+                        continue
+                    print(f"FAILED: {e}")
+                    break
+            if symbols is None:
                 continue
 
             # Filter to Common Stock / Preferred Stock only
@@ -97,6 +80,7 @@ def load_european_data(exchange_filter: list = None):
             print(f"{len(symbols)} tickers", end="", flush=True)
             total_fetched += len(symbols)
 
+            skipped = 0
             records = []
             for sym in symbols:
                 code = sym.get("Code", "")
@@ -105,12 +89,16 @@ def load_european_data(exchange_filter: list = None):
                 country = sym.get("Country", "")
 
                 if not code or not isin:
+                    skipped += 1
                     continue
 
                 suffix = get_suffix(exchange_code, country)
                 ticker = f"{code}{suffix}"
 
                 records.append((isin, ticker, name))
+
+            if skipped > 0:
+                print(f" ({skipped} skipped, no ISIN)")
 
             if not records:
                 print(" → 0 upserted")
