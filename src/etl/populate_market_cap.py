@@ -74,24 +74,56 @@ def main():
 
     updated = 0
     skipped = 0
-    consecutive_failures = 0
 
-    for i in range(0, total, args.batch):
+    i = 0
+    while i < total:
         batch = tickers[i: i + args.batch]
-        results = []
 
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            future_map = {executor.submit(fetch_market_cap, t): t for t in batch}
-            for future in as_completed(future_map):
-                try:
-                    results.append(future.result())
-                except Exception as e:
-                    print(f"  ! Error: {e}")
-                    results.append((future_map[future], None))
+        # Batch-level retry loop: when yfinance session expires (all 401s),
+        # wait and retry the same batch instead of skipping those tickers.
+        batch_retries = 0
+        max_batch_retries = 5
+        final_results = None
 
-        # Batch update
+        while batch_retries <= max_batch_retries:
+            results = []
+
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                future_map = {executor.submit(fetch_market_cap, t): t for t in batch}
+                for future in as_completed(future_map):
+                    try:
+                        results.append(future.result())
+                    except Exception as e:
+                        print(f"  ! Error: {e}")
+                        results.append((future_map[future], None))
+
+            batch_failures = sum(1 for _, mcap in results if mcap is None)
+            fail_rate = batch_failures / len(batch) if batch else 0
+
+            batch_num = i // args.batch + 1
+            total_batches = (total + args.batch - 1) // args.batch
+
+            # If nearly all failed, retry the batch after a long cooldown
+            if fail_rate >= 0.9 and batch_retries < max_batch_retries:
+                batch_retries += 1
+                cooldown = 15 * (2 ** (batch_retries - 1))  # 15s, 30s, 60s, 120s, 240s
+                print(f"  Batch {batch_num}/{total_batches}: {batch_failures}/{len(batch)} failed, "
+                      f"retry {batch_retries}/{max_batch_retries} after {cooldown}s cooldown...")
+                refresh_yfinance_session()
+                time.sleep(cooldown)
+            else:
+                # Accept this result — good enough or gave up after max retries
+                final_results = results
+                time.sleep(3.0)
+                break
+
+        # If we exhausted retries without ever accepting, use the last result
+        if final_results is None:
+            final_results = results
+
+        # Commit whatever we got for this batch (only once)
         with engine.begin() as conn:
-            for ticker, mcap in results:
+            for ticker, mcap in final_results:
                 if mcap is not None and mcap > 0:
                     conn.execute(
                         text("UPDATE dim_entities SET market_cap = :mcap WHERE ticker = :ticker"),
@@ -101,20 +133,12 @@ def main():
                 else:
                     skipped += 1
 
-        batch_failures = sum(1 for _, mcap in results if mcap is None)
-        print(f"  Batch {i // args.batch + 1}/{(total + args.batch - 1) // args.batch}: "
+        batch_num = i // args.batch + 1
+        total_batches = (total + args.batch - 1) // args.batch
+        print(f"  Batch {batch_num}/{total_batches}: "
               f"{updated} updated, {skipped} skipped so far")
 
-        # Dynamic backoff: if most of the batch failed, increase delay
-        if batch_failures > len(batch) * 0.5:
-            consecutive_failures += 1
-            delay = min(3.0 * (2 ** consecutive_failures), 60.0)
-            print(f"  ! High failure rate ({batch_failures}/{len(batch)}), backing off {delay:.0f}s...")
-            refresh_yfinance_session()
-            time.sleep(delay)
-        else:
-            consecutive_failures = 0
-            time.sleep(3.0)
+        i += args.batch
 
     print(f"\nDone. Updated: {updated}, Skipped (no data): {skipped}")
 
