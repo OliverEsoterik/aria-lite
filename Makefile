@@ -1,4 +1,4 @@
-.PHONY: setup start-db stop-db stop status migrate run update-sec-tickers update-eu-tickers ratings tsmom tsmom-weights tsmom-positions clean \
+.PHONY: setup start-db stop-db stop status migrate run update-sec-tickers update-eu-tickers populate-market-cap ratings tsmom tsmom-weights tsmom-positions clean \
 	hmm-train-regime hmm-predict-regime hmm-train-trend hmm-train-trend-all \
 	hmm-predict-trend hmm-predict-trend-all
 
@@ -71,13 +71,17 @@ update-eu-tickers: start-db
 		cd src/etl && python3 00_populate_european_entities.py \
 		$(if $(EXCHANGES),--exchanges $(EXCHANGES),)
 
+populate-market-cap: start-db
+	@echo "Populating market cap from yfinance..."
+	cd src/etl && python3 populate_market_cap.py $(if $(SKIP_EXISTING),--skip-existing,)
+
 statistics: start-db
 	@echo "Computing statistics..."
 	cd src/etl && python3 02_compute_statistics.py
 
 ratings: start-db
 	@echo "Generating production ratings..."
-	cd src/etl && python3 03_generate_production_ratings.py
+	cd src/etl && python3 03_generate_production_ratings.py $(if $(US),--us,) $(if $(EU),--eu,)
 
 tsmom: start-db
 	@echo "Running TSMOM Execution Engine..."
