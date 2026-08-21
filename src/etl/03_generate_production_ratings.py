@@ -269,20 +269,18 @@ import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500, us_only=False, eu_only=False,
-                        min_dollar_vol=10_000_000, min_market_cap=500_000_000):
+                        min_market_cap=500_000_000):
     # Step A: Fetch Broad Universe filtered by absolute quality thresholds
-    # Dollar-volume floor removes illiquid tickers. Market-cap floor removes micro-caps.
-    # Both use absolute thresholds, not relative rank, so the pool is stable across runs.
+    # Market-cap floor removes micro-caps and illiquid tickers.
     query = """
         SELECT DISTINCT ON (ticker) ticker, sma_252, vol_20, rsi_14
         FROM statistics
-        WHERE vol_20 * sma_252 >= :min_dollar_vol
-          AND ticker IN (
-              SELECT ticker FROM dim_entities
-              WHERE market_cap IS NOT NULL AND market_cap >= :min_market_cap
-          )
+        WHERE ticker IN (
+            SELECT ticker FROM dim_entities
+            WHERE market_cap IS NOT NULL AND market_cap >= :min_market_cap
+        )
     """
-    params = {"min_dollar_vol": min_dollar_vol, "min_market_cap": min_market_cap}
+    params = {"min_market_cap": min_market_cap}
     where_clauses = []
     if us_only:
         where_clauses.append("ticker NOT LIKE '%.%'")
