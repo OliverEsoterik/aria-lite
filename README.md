@@ -48,7 +48,8 @@ We use a `Makefile` to orchestrate local development tasks cleanly. Once inside 
   - Add `EXCHANGE=CODE` to process only tickers from a specific European exchange (codes: LSE, XETRA, SW, ST, HE, CO, OL, WAR, MC, IR, PA, AS, BR, LS): `make run EXCHANGE=LSE MAX=100`
 * `make update-sec-tickers`: Fetches US tickers from the SEC and upserts them into the `dim_entities` table. Run standalone — not needed if you use `make setup` or `make run`.
 * `make update-eu-tickers`: Fetches European tickers from the EODHD API (LSE, XETRA, Euronext, SIX, Nasdaq Nordic, WSE, BME, Oslo Bors) and upserts them into `dim_entities` alongside US tickers. Requires `EODHD_API_TOKEN`. Optionally test with a single exchange: `make update-eu-tickers EODHD_API_TOKEN=xxx EXCHANGES=WAR`.
-* `make ratings`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
+* `make populate-market-cap [SKIP_EXISTING=1]`: (**One-time**) Fetches market cap from yfinance for all tickers in `dim_entities` and stores it in the database. Required before the ratings pipeline can use the market-cap quality floor.
+* `make ratings [US=1] [EU=1]`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
 * `make tsmom`: Runs the TSMOM Execution Engine against your current portfolio, printing a full position table with recommended actions.
 * `make tsmom-positions POSITIONS_FILE=path/to/positions.json [VOLATILITY_TARGET=1]`: Reads your current holdings as **absolute EUR amounts** (`{"NVDA": 10000, "MSFT": 8000}`) and computes target allocations. Set `VOLATILITY_TARGET=1` (default for fully-invested portfolios) to deploy near-full capital. Lower values (e.g. `0.15`) reserve more cash.
 * `make tsmom-weights WEIGHTS_FILE=path/to/weights.json`: Same as above, but reads your actual position weights from a JSON file (`{"NVDA": 0.08, "MSFT": 0.05, ...}`) instead of assuming equal weight.
@@ -93,6 +94,16 @@ Upon running `nix develop`, the environment automatically sets up the following 
 * `PROJECT_ROOT`: Absolute path to this repository
 * `SEC_USER_AGENT_EMAIL`: Required for SEC and EODHD API access. Set this to your email.
 * `EODHD_API_TOKEN`: Required for European ticker population. Sign up at [eodhd.com](https://eodhd.com/register) for a free API key.
+
+### Universe Quality — Hard Thresholds & Percentile Normalization
+
+The ratings pipeline (`03_generate_production_ratings.py`) uses a **market-cap floor** and **percentile rank normalization** to produce stable, high-quality scores regardless of ticker insertion order (US tickers are market-cap sorted, European tickers are alphabetically sorted by exchange).
+
+- **Market-cap floor ($500M):** The SQL query filters to tickers with `market_cap >= 500_000_000` before any computation. This removes micro-caps and ensures the reference pool contains only real, investable companies. Run `make populate-market-cap` once to populate this data from yfinance.
+- **Percentile rank normalization:** Instead of z-scores (which shift when the pool composition changes), each factor is converted to a percentile rank and mapped to a [-3, +3] scale using the Abramowitz & Stegun approximation of the inverse normal CDF. A stock's score depends only on its rank among peers, not on the pool's mean/std.
+- **Dollar-volume sorting:** Within the thresholded pool, tickers are sorted by dollar volume (`vol_20 * sma_252`) for confidence ordering.
+
+The `--us` and `--eu` flags stack on top of these thresholds. Running `make run US=1 MAX=2500` gives you ratings against the top 2500 US stocks that also clear the $500M market-cap floor.
 
 ### ETL Scripts
 Python scripts (`src/etl/01_fetch_price_data.py`, `src/etl/02_compute_statistics.py`, `src/etl/03_generate_production_ratings.py`) execute using the dependencies pinned in the Nix environment. Database connections intelligently read from the environment variables, meaning no hardcoded credentials are used.
