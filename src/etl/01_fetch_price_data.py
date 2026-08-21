@@ -29,6 +29,8 @@ def load_tickers_from_db(engine, max_tickers: Optional[int] = None,
     query = "SELECT ticker, entity_pk FROM dim_entities"
     params = {}
     where_clauses = []
+    # Quality floor: only tickers with known market cap >= $500M
+    where_clauses.append("market_cap IS NOT NULL AND market_cap >= 500000000")
     if us_only:
         where_clauses.append("ticker NOT LIKE '%\\.%'")
     if eu_only:

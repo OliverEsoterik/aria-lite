@@ -102,9 +102,26 @@ fi
 run_step "src/etl/01_fetch_price_data.py" "${ARGS[@]}"
 
 # Step 2: Statistics Computations
-run_step "src/etl/02_compute_statistics.py"
+STATS_ARGS=()
+if [ "$US_ONLY" = true ]; then
+    STATS_ARGS+=(--us)
+fi
+if [ "$EU_ONLY" = true ]; then
+    STATS_ARGS+=(--eu)
+fi
+if [ -n "$MAX_TICKERS" ]; then
+    STATS_ARGS+=(--max "$MAX_TICKERS")
+fi
+run_step "src/etl/02_compute_statistics.py" "${STATS_ARGS[@]}"
 
 # Step 3: Production Ratings
-run_step "src/etl/03_generate_production_ratings.py"
+RATING_ARGS=()
+if [ "$US_ONLY" = true ]; then
+    RATING_ARGS+=(--us)
+fi
+if [ "$EU_ONLY" = true ]; then
+    RATING_ARGS+=(--eu)
+fi
+run_step "src/etl/03_generate_production_ratings.py" "${RATING_ARGS[@]}"
 
 echo ">>> ALL ETL STEPS COMPLETED SUCCESSFULLY <<<"

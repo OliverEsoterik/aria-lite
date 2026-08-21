@@ -2,6 +2,7 @@ import pandas as pd
 import pandas_ta as ta
 import numpy as np
 import time
+import argparse
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.postgresql import insert
 
@@ -164,15 +165,23 @@ def process_ticker_batch(engine, tickers):
             print(f"      ! Error processing {ticker}: {e}")
             continue
 
-def main_update_loop():
+def main_update_loop(us_only=False, eu_only=False, max_tickers=None):
     print("--- STARTING STATISTICS ENGINE ---")
     
     # 1. FETCH WITH FEEDBACK
-    # We use a subquery to force Postgres to use the Index on 'ticker'
-    ticker_query = text("""
+    where_clauses = []
+    # Quality floor: only tickers with known market cap >= $500M
+    where_clauses.append("ticker IN (SELECT ticker FROM dim_entities WHERE market_cap IS NOT NULL AND market_cap >= 500000000)")
+    if us_only:
+        where_clauses.append("ticker NOT LIKE '%.%'")
+    if eu_only:
+        where_clauses.append("ticker LIKE '%.%'")
+    where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+    limit_sql = f" LIMIT {max_tickers}" if max_tickers else ""
+    ticker_query = text(f"""
         SELECT ticker 
-        FROM (SELECT ticker FROM market_prices GROUP BY ticker) sub
-        ORDER BY ticker;
+        FROM (SELECT ticker FROM market_prices GROUP BY ticker) sub{where_sql}
+        ORDER BY ticker{limit_sql};
     """)
 
     print("Fetching ticker list from index...")
@@ -229,4 +238,9 @@ def main_update_loop():
     print("\n--- UPDATE COMPLETE ---")
 
 if __name__ == "__main__":
-    main_update_loop()
+    parser = argparse.ArgumentParser(description="Compute statistics")
+    parser.add_argument("--us", action="store_true", help="Only process US tickers (no dot suffix)")
+    parser.add_argument("--eu", action="store_true", help="Only process European tickers (with dot suffix)")
+    parser.add_argument("--max", type=int, default=None, help="Maximum number of tickers to process")
+    args = parser.parse_args()
+    main_update_loop(us_only=args.us, eu_only=args.eu, max_tickers=args.max)
