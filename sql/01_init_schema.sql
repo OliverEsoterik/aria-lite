@@ -7,10 +7,22 @@ CREATE TABLE IF NOT EXISTS dim_entities (
     sic_code TEXT, 
     sector TEXT, 
     industry TEXT, 
+    market_cap BIGINT,
     first_filing_id TEXT,
     dw_loaded_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (entity_identifier, ticker)
 );
+
+-- Add market_cap column to existing installations
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'dim_entities' AND column_name = 'market_cap'
+    ) THEN
+        ALTER TABLE dim_entities ADD COLUMN market_cap BIGINT;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS market_prices (
     timestamp       TIMESTAMPTZ     NOT NULL,
