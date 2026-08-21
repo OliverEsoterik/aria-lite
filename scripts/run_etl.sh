@@ -4,6 +4,7 @@
 #   --skip-entities   Skip the 00_populate_entities.py step (useful for daily runs)
 #   --max N           Limit to the first N tickers (forwarded to 01_fetch_price_data.py)
 #   --us              Only process US tickers (no suffix, e.g. AAPL)
+#   --exchange CODE    Only process tickers for a specific EODHD exchange (e.g. LSE, XETRA, WAR)
 
 set -euo pipefail
 
@@ -11,6 +12,7 @@ PROJECT_ROOT=${PROJECT_ROOT:-$PWD}
 SKIP_ENTITY_POPULATION=false
 MAX_TICKERS=""
 US_ONLY=false
+EXCHANGE=""
 
 # --- Parse CLI arguments ---
 while [[ "$#" -gt 0 ]]; do
@@ -27,9 +29,13 @@ while [[ "$#" -gt 0 ]]; do
             US_ONLY=true
             shift
             ;;
+        --exchange)
+            EXCHANGE="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: $0 [--skip-entities] [--max N] [--us]" >&2
+            echo "Usage: $0 [--skip-entities] [--max N] [--us] [--exchange CODE]" >&2
             exit 1
             ;;
     esac
@@ -81,6 +87,9 @@ if [ -n "$MAX_TICKERS" ]; then
 fi
 if [ "$US_ONLY" = true ]; then
     ARGS+=(--us)
+fi
+if [ -n "$EXCHANGE" ]; then
+    ARGS+=(--exchange "$EXCHANGE")
 fi
 run_step "src/etl/01_fetch_price_data.py" "${ARGS[@]}"
 
