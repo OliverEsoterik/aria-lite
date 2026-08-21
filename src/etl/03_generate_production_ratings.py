@@ -2,6 +2,7 @@ import pandas as pd
 import yfinance as yf
 from sqlalchemy import create_engine, text
 import numpy as np
+import argparse
 
 # --- Configuration ---
 import os
@@ -267,17 +268,38 @@ import time
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500):
-    # Step A: Fetch Broad Universe
-    df = pd.read_sql("SELECT DISTINCT ON (ticker) ticker, sma_252, vol_20, rsi_14 FROM statistics ORDER BY ticker, timestamp DESC", engine)
+def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500, us_only=False, eu_only=False,
+                        min_dollar_vol=10_000_000, min_market_cap=500_000_000):
+    # Step A: Fetch Broad Universe filtered by absolute quality thresholds
+    # Dollar-volume floor removes illiquid tickers. Market-cap floor removes micro-caps.
+    # Both use absolute thresholds, not relative rank, so the pool is stable across runs.
+    query = """
+        SELECT DISTINCT ON (ticker) ticker, sma_252, vol_20, rsi_14
+        FROM statistics
+        WHERE vol_20 * sma_252 >= :min_dollar_vol
+          AND ticker IN (
+              SELECT ticker FROM dim_entities
+              WHERE market_cap IS NOT NULL AND market_cap >= :min_market_cap
+          )
+    """
+    params = {"min_dollar_vol": min_dollar_vol, "min_market_cap": min_market_cap}
+    where_clauses = []
+    if us_only:
+        where_clauses.append("ticker NOT LIKE '%.%'")
+    if eu_only:
+        where_clauses.append("ticker LIKE '%.%'")
+    if where_clauses:
+        query += " AND " + " AND ".join(where_clauses)
+    query += " ORDER BY ticker, timestamp DESC"
+    df = pd.read_sql(text(query), engine, params=params)
     if df.empty: return None, None
 
     # Persistence Injection
     portfolio_df = df[df['ticker'].isin(CURRENT_PORTFOLIO)].copy()
 
-    # Step B: Liquidity Filter
+    # Step B: Liquidity Sort (confidence ordering, no hard cut — the pool is already thresholded)
     df['dollar_volume'] = df['vol_20'] * df['sma_252']
-    candidates = df.sort_values('dollar_volume', ascending=False).head(1500).copy()
+    candidates = df.sort_values('dollar_volume', ascending=False)
     combined_candidates = pd.concat([candidates, portfolio_df]).drop_duplicates('ticker')
 
     # --- Step C: ELITE MOMENTUM FUNNEL ---
@@ -318,15 +340,39 @@ def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500):
     # Production Join: Left join ensures portfolio isn't dropped if API fails for one ticker
     final_merged = research_pool.merge(fund_df, on='ticker', how='left')
 
-    # --- Step F: ELITE Z-SCORE NORMALIZATION ---
-    def z_score(s): return (s - s.mean()) / (s.std() + 1e-6)
+    # --- Step F: PERCENTILE RANK NORMALIZATION ---
+    # Converts each factor to its percentile rank mapped to approx [-3, +3].
+    # Unlike z-score, this is stable regardless of pool composition — a stock's rank
+    # depends only on its position relative to peers, not on the pool's mean/std.
+    def rank_normalize(s):
+        """Rank-based normalization. Maps percentile rank to z-score-like scale [-3, +3].
+        Uses Abramowitz & Stegun approximation for the standard normal quantile
+        function — no scipy dependency."""
+        n = len(s)
+        if n < 2:
+            return s * 0.0
+        # Rank from 1..n, convert to percentile (0..1) exclusive at both ends
+        ranks = s.rank(method='average')
+        p = (ranks - 0.5) / n
+        p = p.clip(1e-6, 1 - 1e-6)
+        # Abramowitz & Stegun approximation for inverse normal CDF
+        # (accurate to ~1e-4)
+        t = np.where(p < 0.5, p, 1 - p)
+        t = np.sqrt(-2 * np.log(t))
+        c0, c1, c2 = 2.515517, 0.802853, 0.010328
+        d1, d2, d3 = 1.432788, 0.189269, 0.001308
+        z = t - (c0 + c1*t + c2*t**2) / (1 + d1*t + d2*t**2 + d3*t**3)
+        z = np.where(p < 0.5, -z, z)
+        # Clip extreme values
+        z = np.clip(z, -3.5, 3.5)
+        return z
     
-    final_merged['z_mom_risk_adj'] = z_score(final_merged['mom_score'].fillna(0))
-    final_merged['z_mom_qual'] = z_score(final_merged['mom_quality'].fillna(0))
-    final_merged['z_accel'] = z_score(final_merged['acceleration'].fillna(0))
+    final_merged['z_mom_risk_adj'] = rank_normalize(final_merged['mom_score'].fillna(0))
+    final_merged['z_mom_qual'] = rank_normalize(final_merged['mom_quality'].fillna(0))
+    final_merged['z_accel'] = rank_normalize(final_merged['acceleration'].fillna(0))
 
-    final_merged['z_eps'] = z_score(final_merged['eps_rev'].fillna(0))
-    final_merged['z_state'] = (z_score(final_merged['rsi_14'].fillna(50)) * -0.5) + (z_score(final_merged['vol_20'].fillna(0)) * 0.5)
+    final_merged['z_eps'] = rank_normalize(final_merged['eps_rev'].fillna(0))
+    final_merged['z_state'] = (rank_normalize(final_merged['rsi_14'].fillna(50)) * -0.5) + (rank_normalize(final_merged['vol_20'].fillna(0)) * 0.5)
     
     final_merged['s_qual'] = (
         (final_merged['rev_growth'].fillna(0).clip(0, 0.4) / 0.4 * 0.5) + 
@@ -365,7 +411,12 @@ def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500):
     return top_picks, portfolio_status
 
 if __name__ == "__main__":
-    picks, status = get_today_best_buys(engine)
+    parser = argparse.ArgumentParser(description="Generate production ratings")
+    parser.add_argument("--us", action="store_true", help="Only rate US tickers (no dot suffix)")
+    parser.add_argument("--eu", action="store_true", help="Only rate European tickers (with dot suffix)")
+    args = parser.parse_args()
+
+    picks, status = get_today_best_buys(engine, us_only=args.us, eu_only=args.eu)
     
     if picks is not None:
         pd.set_option('display.max_columns', None)
