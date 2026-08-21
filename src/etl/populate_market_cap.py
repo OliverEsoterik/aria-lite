@@ -19,15 +19,25 @@ DB_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg2:///alphapicks")
 engine = create_engine(DB_URL, pool_pre_ping=True)
 
 
-def fetch_market_cap(ticker):
-    """Fetch market cap for a single ticker. Returns (ticker, market_cap) or (ticker, None)."""
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        mcap = info.get("marketCap")
-        return (ticker, mcap)
-    except Exception:
-        return (ticker, None)
+def fetch_market_cap(ticker, max_retries=3):
+    """Fetch market cap for a single ticker. Retries on 401 with backoff."""
+    import requests
+    for attempt in range(max_retries):
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            mcap = info.get("marketCap")
+            return (ticker, mcap)
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401 and attempt < max_retries - 1:
+                wait = 2 ** (attempt + 2)  # 4s, 8s, 16s
+                print(f"  ! 401 on {ticker}, retrying in {wait}s (attempt {attempt + 2}/{max_retries})...")
+                time.sleep(wait)
+                continue
+            return (ticker, None)
+        except Exception:
+            return (ticker, None)
+    return (ticker, None)
 
 
 def main():
@@ -52,6 +62,7 @@ def main():
 
     updated = 0
     skipped = 0
+    consecutive_failures = 0
 
     for i in range(0, total, args.batch):
         batch = tickers[i: i + args.batch]
@@ -78,10 +89,19 @@ def main():
                 else:
                     skipped += 1
 
+        batch_failures = sum(1 for _, mcap in results if mcap is None)
         print(f"  Batch {i // args.batch + 1}/{(total + args.batch - 1) // args.batch}: "
               f"{updated} updated, {skipped} skipped so far")
 
-        time.sleep(1.5)  # Anti-throttling
+        # Dynamic backoff: if most of the batch failed, increase delay
+        if batch_failures > len(batch) * 0.5:
+            consecutive_failures += 1
+            delay = min(3.0 * (2 ** consecutive_failures), 60.0)
+            print(f"  ! High failure rate ({batch_failures}/{len(batch)}), backing off {delay:.0f}s...")
+            time.sleep(delay)
+        else:
+            consecutive_failures = 0
+            time.sleep(3.0)
 
     print(f"\nDone. Updated: {updated}, Skipped (no data): {skipped}")
 
