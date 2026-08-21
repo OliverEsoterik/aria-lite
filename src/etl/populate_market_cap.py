@@ -3,9 +3,9 @@
 populate_market_cap.py - Fetch market cap from yfinance for all tickers in dim_entities
 and store it in the market_cap column.
 
-Usage: python3 populate_market_cap.py [--batch N] [--skip-existing]
+Usage: python3 populate_market_cap.py [--batch N] [--refresh-all]
   --batch N        Process N tickers per batch (default: 50)
-  --skip-existing  Skip tickers that already have market_cap set
+  --refresh-all    Re-fetch market cap for ALL tickers (default: only missing ones)
 """
 
 import time
@@ -55,15 +55,17 @@ def fetch_market_cap(ticker, max_retries=3):
 def main():
     parser = argparse.ArgumentParser(description="Populate market_cap in dim_entities")
     parser.add_argument("--batch", type=int, default=50, help="Tickers per batch (default: 50)")
-    parser.add_argument("--skip-existing", action="store_true",
-                        help="Skip tickers that already have market_cap")
+    parser.add_argument("--refresh-all", action="store_true",
+                        help="Re-fetch market cap for all tickers (default: only missing)")
     args = parser.parse_args()
 
-    # Load tickers from dim_entities
-    if args.skip_existing:
-        query = "SELECT ticker FROM dim_entities WHERE market_cap IS NULL ORDER BY entity_pk ASC"
-    else:
+    # Default: skip tickers that already have market_cap. Use --refresh-all to re-process everything.
+    if args.refresh_all:
         query = "SELECT ticker FROM dim_entities ORDER BY entity_pk ASC"
+        print("Refresh-all mode: processing ALL tickers...")
+    else:
+        query = "SELECT ticker FROM dim_entities WHERE market_cap IS NULL ORDER BY entity_pk ASC"
+        print("Default mode: skipping tickers with existing market_cap. Use --refresh-all to override.")
 
     with engine.connect() as conn:
         result = conn.execute(text(query))

@@ -73,7 +73,11 @@ update-eu-tickers: start-db
 
 populate-market-cap: start-db
 	@echo "Populating market cap from yfinance..."
-	cd src/etl && python3 populate_market_cap.py $(if $(SKIP_EXISTING),--skip-existing,)
+	cd src/etl && python3 populate_market_cap.py $(if $(REFRESH_ALL),--refresh-all,)
+
+populate-market-cap-refresh: start-db
+	@echo "Refreshing ALL market caps from yfinance..."
+	cd src/etl && python3 populate_market_cap.py --refresh-all
 
 statistics: start-db
 	@echo "Computing statistics..."
