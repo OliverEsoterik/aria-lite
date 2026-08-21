@@ -12,14 +12,18 @@ DEFAULT_START_DATE = (pd.Timestamp.today() - pd.DateOffset(years=10)).strftime('
 CHUNK_SIZE = 200
 API_SLEEP_SECONDS = 0.7
 
-def load_tickers_from_db(engine, max_tickers: Optional[int] = None) -> List[Dict]:
-    """Fetch tickers from dim_entities ordered by market cap (entity_pk ASC).
+def load_tickers_from_db(engine, max_tickers: Optional[int] = None, us_only: bool = False) -> List[Dict]:
+    """Fetch tickers from dim_entities.
 
     Returns a list of dicts with keys: ticker, entity_pk.
     If max_tickers is set, only the top N are returned.
+    If us_only is True, only US tickers (no dot suffix) are returned.
     """
-    query = "SELECT ticker, entity_pk FROM dim_entities ORDER BY entity_pk ASC"
+    query = "SELECT ticker, entity_pk FROM dim_entities"
     params = {}
+    if us_only:
+        query += " WHERE ticker NOT LIKE '%\\.%'"
+    query += " ORDER BY entity_pk ASC"
     if max_tickers:
         query += " LIMIT :max_tickers"
         params = {"max_tickers": max_tickers}
@@ -177,6 +181,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Fetch price data from yfinance")
     parser.add_argument("--max", type=int, default=None,
                         help="Maximum number of tickers to process (default: all)")
+    parser.add_argument("--us", action="store_true",
+                        help="Only process US tickers (no suffix, e.g. AAPL)")
     return parser.parse_args()
 
 
@@ -187,7 +193,7 @@ def main():
     engine = create_engine(DB_CONN_STR, pool_pre_ping=True)
 
     # Load tickers from DB instead of JSON file
-    ticker_rows = load_tickers_from_db(engine, max_tickers=args.max)
+    ticker_rows = load_tickers_from_db(engine, max_tickers=args.max, us_only=args.us)
     if not ticker_rows:
         print(">>> No tickers to process. Exiting.")
         return

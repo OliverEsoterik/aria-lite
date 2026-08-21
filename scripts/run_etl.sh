@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # run_etl.sh - Sequentially runs ETL steps with automatic restart on failure
-# Usage: ./scripts/run_etl.sh [--skip-entities] [--max N]
+# Usage: ./scripts/run_etl.sh [--skip-entities] [--max N] [--us]
 #   --skip-entities   Skip the 00_populate_entities.py step (useful for daily runs)
 #   --max N           Limit to the first N tickers (forwarded to 01_fetch_price_data.py)
+#   --us              Only process US tickers (no suffix, e.g. AAPL)
 
 set -euo pipefail
 
 PROJECT_ROOT=${PROJECT_ROOT:-$PWD}
 SKIP_ENTITY_POPULATION=false
 MAX_TICKERS=""
+US_ONLY=false
 
 # --- Parse CLI arguments ---
 while [[ "$#" -gt 0 ]]; do
@@ -21,9 +23,13 @@ while [[ "$#" -gt 0 ]]; do
             MAX_TICKERS="$2"
             shift 2
             ;;
+        --us)
+            US_ONLY=true
+            shift
+            ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: $0 [--skip-entities] [--max N]" >&2
+            echo "Usage: $0 [--skip-entities] [--max N] [--us]" >&2
             exit 1
             ;;
     esac
@@ -69,11 +75,14 @@ if [ "$SKIP_ENTITY_POPULATION" = false ]; then
 fi
 
 # Step 1: Price Data Update
+ARGS=()
 if [ -n "$MAX_TICKERS" ]; then
-    run_step "src/etl/01_fetch_price_data.py" "--max" "$MAX_TICKERS"
-else
-    run_step "src/etl/01_fetch_price_data.py"
+    ARGS+=(--max "$MAX_TICKERS")
 fi
+if [ "$US_ONLY" = true ]; then
+    ARGS+=(--us)
+fi
+run_step "src/etl/01_fetch_price_data.py" "${ARGS[@]}"
 
 # Step 2: Statistics Computations
 run_step "src/etl/02_compute_statistics.py"

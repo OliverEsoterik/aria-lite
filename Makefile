@@ -4,9 +4,10 @@
 
 SEC_USER_AGENT_EMAIL ?= your.email@address.com
 MAX ?=
+US ?=
 
 setup: start-db migrate
-	SEC_USER_AGENT_EMAIL=$(SEC_USER_AGENT_EMAIL) ./scripts/run_etl.sh $(if $(filter-out 0,$(MAX)),--max $(MAX),)
+	SEC_USER_AGENT_EMAIL=$(SEC_USER_AGENT_EMAIL) ./scripts/run_etl.sh $(if $(filter-out 0,$(MAX)),--max $(MAX),) $(if $(US),--us,)
 
 start-db:
 	@if [ ! -d "$(DB_PATH)" ]; then \
@@ -54,7 +55,7 @@ migrate: start-db
 
 run: start-db
 	@echo "Running daily services..."
-	./scripts/run_etl.sh --skip-entities $(if $(filter-out 0,$(MAX)),--max $(MAX),)
+	./scripts/run_etl.sh --skip-entities $(if $(filter-out 0,$(MAX)),--max $(MAX),) $(if $(US),--us,)
 
 update-sec-tickers: start-db
 	@echo "Updating SEC tickers..."
