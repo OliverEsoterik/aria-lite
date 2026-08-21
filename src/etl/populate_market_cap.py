@@ -19,6 +19,16 @@ DB_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg2:///alphapicks")
 engine = create_engine(DB_URL, pool_pre_ping=True)
 
 
+def refresh_yfinance_session():
+    """Force yfinance to get a fresh crumb/session."""
+    try:
+        # Clear the cached session so yfinance creates a new one
+        if hasattr(yf, 'shared') and hasattr(yf.shared, '_session'):
+            yf.shared._session = None
+    except Exception:
+        pass
+
+
 def fetch_market_cap(ticker, max_retries=3):
     """Fetch market cap for a single ticker. Retries on 401 with backoff."""
     import requests
@@ -32,6 +42,8 @@ def fetch_market_cap(ticker, max_retries=3):
             if e.response.status_code == 401 and attempt < max_retries - 1:
                 wait = 2 ** (attempt + 2)  # 4s, 8s, 16s
                 print(f"  ! 401 on {ticker}, retrying in {wait}s (attempt {attempt + 2}/{max_retries})...")
+                # Force a fresh session before retry
+                refresh_yfinance_session()
                 time.sleep(wait)
                 continue
             return (ticker, None)
@@ -98,6 +110,7 @@ def main():
             consecutive_failures += 1
             delay = min(3.0 * (2 ** consecutive_failures), 60.0)
             print(f"  ! High failure rate ({batch_failures}/{len(batch)}), backing off {delay:.0f}s...")
+            refresh_yfinance_session()
             time.sleep(delay)
         else:
             consecutive_failures = 0
