@@ -44,6 +44,7 @@ We use a `Makefile` to orchestrate local development tasks cleanly. Once inside 
 * `make setup`: **(First-time only)** Initializes the database cluster, installs the TimescaleDB extension, applies SQL schema (`sql/01_init_schema.sql`), and executes the full ETL pipeline including entity population (`scripts/run_etl.sh`). Optionally limit tickers: `make setup MAX=100`. Combine with `US=1` for US-only: `make setup US=1 MAX=1000`.
 * `make run`: The standard command to run your daily scripts. It ensures the database is running in the background and executes the ETL pipeline. Optionally limit tickers: `make run MAX=100`. By default processes **all** tickers (US + European).
   - Add `US=1` to process only US tickers: `make run US=1 MAX=2500`
+  - Add `EU=1` to process only European tickers: `make run EU=1 MAX=100`
   - Add `EXCHANGE=CODE` to process only tickers from a specific European exchange (codes: LSE, XETRA, SW, ST, HE, CO, OL, WAR, MC, IR, PA, AS, BR, LS): `make run EXCHANGE=LSE MAX=100`
 * `make update-sec-tickers`: Fetches US tickers from the SEC and upserts them into the `dim_entities` table. Run standalone — not needed if you use `make setup` or `make run`.
 * `make update-eu-tickers`: Fetches European tickers from the EODHD API (LSE, XETRA, Euronext, SIX, Nasdaq Nordic, WSE, BME, Oslo Bors) and upserts them into `dim_entities` alongside US tickers. Requires `EODHD_API_TOKEN`. Optionally test with a single exchange: `make update-eu-tickers EODHD_API_TOKEN=xxx EXCHANGES=WAR`.

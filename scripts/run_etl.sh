@@ -12,6 +12,7 @@ PROJECT_ROOT=${PROJECT_ROOT:-$PWD}
 SKIP_ENTITY_POPULATION=false
 MAX_TICKERS=""
 US_ONLY=false
+EU_ONLY=false
 EXCHANGE=""
 
 # --- Parse CLI arguments ---
@@ -27,6 +28,10 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --us)
             US_ONLY=true
+            shift
+            ;;
+        --eu)
+            EU_ONLY=true
             shift
             ;;
         --exchange)
@@ -87,6 +92,9 @@ if [ -n "$MAX_TICKERS" ]; then
 fi
 if [ "$US_ONLY" = true ]; then
     ARGS+=(--us)
+fi
+if [ "$EU_ONLY" = true ]; then
+    ARGS+=(--eu)
 fi
 if [ -n "$EXCHANGE" ]; then
     ARGS+=(--exchange "$EXCHANGE")
