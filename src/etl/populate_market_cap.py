@@ -106,7 +106,7 @@ def main():
             # If nearly all failed, retry the batch after a long cooldown
             if fail_rate >= 0.9 and batch_retries < max_batch_retries:
                 batch_retries += 1
-                cooldown = 15 * (2 ** (batch_retries - 1))  # 15s, 30s, 60s, 120s, 240s
+                cooldown = 180 * (2 ** (batch_retries - 1))  # 180s, 360s, 720s, 1440s, 2880s
                 print(f"  Batch {batch_num}/{total_batches}: {batch_failures}/{len(batch)} failed, "
                       f"retry {batch_retries}/{max_batch_retries} after {cooldown}s cooldown...")
                 refresh_yfinance_session()
