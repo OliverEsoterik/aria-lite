@@ -21,6 +21,9 @@ nix develop
 
 # 2. Run the automated setup
 make setup
+
+# 3. Populate market cap data (required for the $500M quality floor)
+make populate-market-cap
 ```
 
 ### 2. Daily Development Workflow
@@ -31,9 +34,11 @@ For day-to-day development, you simply need to enter the Nix environment and sta
 # 1. Enter the Nix environment
 nix develop
 
-# 2. Start the database (if offline) and run daily scripts (skips entity population)
-make run
+# 2. Run daily pipeline (skips entity population, fetches new prices, recomputes stats, generates ratings)
+make run US=1
 ```
+
+The `$500M market-cap floor` ensures only quality tickers are processed. Add `MAX=2500` to limit to the top 2500 US tickers by market cap (speed optimization).
 
 ---
 
@@ -41,14 +46,18 @@ make run
 
 We use a `Makefile` to orchestrate local development tasks cleanly. Once inside `nix develop`, you have access to the following commands:
 
-* `make setup`: **(First-time only)** Initializes the database cluster, installs the TimescaleDB extension, applies SQL schema (`sql/01_init_schema.sql`), and executes the full ETL pipeline including entity population (`scripts/run_etl.sh`). Optionally limit tickers: `make setup MAX=100`. Combine with `US=1` for US-only: `make setup US=1 MAX=1000`.
-* `make run`: The standard command to run your daily scripts. It ensures the database is running in the background and executes the ETL pipeline. Optionally limit tickers: `make run MAX=100`. By default processes **all** tickers (US + European).
-  - Add `US=1` to process only US tickers: `make run US=1 MAX=2500`
-  - Add `EU=1` to process only European tickers: `make run EU=1 MAX=100`
-  - Add `EXCHANGE=CODE` to process only tickers from a specific European exchange (codes: LSE, XETRA, SW, ST, HE, CO, OL, WAR, MC, IR, PA, AS, BR, LS): `make run EXCHANGE=LSE MAX=100`
+* `make setup`: **(First-time only)** Initializes the database cluster, installs the TimescaleDB extension, applies SQL schema (`sql/01_init_schema.sql`), and executes the full ETL pipeline including entity population (`scripts/run_etl.sh`).
+  - Add `US=1` to process only US tickers: `make setup US=1`
+  - Add `EU=1` to process only European tickers: `make setup EU=1`
+  - Add `MAX=N` to limit ticker count (speeds up testing): `make setup US=1 MAX=100`
+* `make run`: The standard command to run your daily scripts. It ensures the database is running in the background and executes the ETL pipeline. By default processes **all** tickers that clear the $500M market-cap floor.
+  - Add `US=1` to process only US tickers: `make run US=1`
+  - Add `EU=1` to process only European tickers: `make run EU=1`
+  - Add `MAX=N` to limit ticker count (speed optimization for US, where insertion order is market-cap sorted): `make run US=1 MAX=2500`
+  - Add `EXCHANGE=CODE` to process tickers from a specific European exchange (codes: LSE, XETRA, SW, ST, HE, CO, OL, WAR, MC, IR, PA, AS, BR, LS): `make run EXCHANGE=LSE`
 * `make update-sec-tickers`: Fetches US tickers from the SEC and upserts them into the `dim_entities` table. Run standalone — not needed if you use `make setup` or `make run`.
 * `make update-eu-tickers`: Fetches European tickers from the EODHD API (LSE, XETRA, Euronext, SIX, Nasdaq Nordic, WSE, BME, Oslo Bors) and upserts them into `dim_entities` alongside US tickers. Requires `EODHD_API_TOKEN`. Optionally test with a single exchange: `make update-eu-tickers EODHD_API_TOKEN=xxx EXCHANGES=WAR`.
-* `make populate-market-cap [SKIP_EXISTING=1]`: (**One-time**) Fetches market cap from yfinance for all tickers in `dim_entities` and stores it in the database. Required before the ratings pipeline can use the market-cap quality floor.
+* `make populate-market-cap [SKIP_EXISTING=1]`: Fetches market cap from yfinance for all tickers in `dim_entities` and stores it in the database. **Required once before the market-cap floor works.** Has retry with backoff for yfinance rate limiting. Does not need daily re-runs — the $500M floor is conservative enough that daily price moves don't materially change the pool.
 * `make ratings [US=1] [EU=1]`: A convenience command to skip the ETL steps and *only* run the final production ratings generation (`03_generate_production_ratings.py`).
 * `make tsmom`: Runs the TSMOM Execution Engine against your current portfolio, printing a full position table with recommended actions.
 * `make tsmom-positions POSITIONS_FILE=path/to/positions.json [VOLATILITY_TARGET=1]`: Reads your current holdings as **absolute EUR amounts** (`{"NVDA": 10000, "MSFT": 8000}`) and computes target allocations. Set `VOLATILITY_TARGET=1` (default for fully-invested portfolios) to deploy near-full capital. Lower values (e.g. `0.15`) reserve more cash.
@@ -80,6 +89,7 @@ See [`src/hmm/README.md`](src/hmm/README.md) for full documentation.
 * The database data is stored locally in the `.db_data` directory within the project root. This directory is ignored by Git.
 * The database listens locally via Unix sockets. You do not need to configure usernames or passwords.
 * The database name created by default is `alphapicks`.
+* The `dim_entities` table has a `market_cap BIGINT` column populated by `make populate-market-cap`. It's nullable — tickers without market cap are excluded from the pipeline.
 * If you want to connect to the database via an external tool (like DBeaver or TablePlus) while it's running, you can connect using:
   * **Host:** `localhost`
   * **Port:** `5432`
@@ -97,16 +107,26 @@ Upon running `nix develop`, the environment automatically sets up the following 
 
 ### Universe Quality — Hard Thresholds & Percentile Normalization
 
-The ratings pipeline (`03_generate_production_ratings.py`) uses a **market-cap floor** and **percentile rank normalization** to produce stable, high-quality scores regardless of ticker insertion order (US tickers are market-cap sorted, European tickers are alphabetically sorted by exchange).
+All three ETL steps (`01_fetch_price_data.py`, `02_compute_statistics.py`, `03_generate_production_ratings.py`) apply a **$500M market-cap floor** before any computation. Only tickers with `market_cap >= 500_000_000` are fetched, processed, and rated. This ensures the pipeline never wastes time on micro-caps or garbage tickers, regardless of insertion order.
 
-- **Market-cap floor ($500M):** The SQL query filters to tickers with `market_cap >= 500_000_000` before any computation. This removes micro-caps and ensures the reference pool contains only real, investable companies. Run `make populate-market-cap` once to populate this data from yfinance.
+- **Market-cap floor ($500M):** Hardcoded in all three ETL scripts as a SQL `WHERE` clause. Tickers below $500M are skipped entirely — no API calls, no compute, no storage.
 - **Percentile rank normalization:** Instead of z-scores (which shift when the pool composition changes), each factor is converted to a percentile rank and mapped to a [-3, +3] scale using the Abramowitz & Stegun approximation of the inverse normal CDF. A stock's score depends only on its rank among peers, not on the pool's mean/std.
 - **Dollar-volume sorting:** Within the thresholded pool, tickers are sorted by dollar volume (`vol_20 * sma_252`) for confidence ordering.
+- **Run `make populate-market-cap` once** to populate the data. Does not need daily re-runs — the $500M floor is conservative.
 
-The `--us` and `--eu` flags stack on top of these thresholds. Running `make run US=1 MAX=2500` gives you ratings against the top 2500 US stocks that also clear the $500M market-cap floor.
+The `--us` and `--eu` flags stack on top of the market-cap floor:
+
+```bash
+make run US=1        # All US stocks with market_cap >= $500M
+make run EU=1        # All EU stocks with market_cap >= $500M
+make run             # Both US + EU, all >= $500M
+make run US=1 MAX=2500  # Speed optimization: top 2500 US (still >= $500M)
+```
 
 ### ETL Scripts
 Python scripts (`src/etl/01_fetch_price_data.py`, `src/etl/02_compute_statistics.py`, `src/etl/03_generate_production_ratings.py`) execute using the dependencies pinned in the Nix environment. Database connections intelligently read from the environment variables, meaning no hardcoded credentials are used.
+
+All three scripts accept `--us` and `--eu` flags to filter by region. The `scripts/run_etl.sh` wrapper propagates these flags from `make run` through all three steps, so the same universe is used consistently across the entire pipeline.
 
 ### TSMOM Execution Engine (`src/etl/04_tsmom_execution_engine.py`)
 
