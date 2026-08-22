@@ -87,6 +87,10 @@ ratings: start-db
 	@echo "Generating production ratings..."
 	cd src/etl && python3 03_generate_production_ratings.py $(if $(US),--us,) $(if $(EU),--eu,)
 
+weekly-report: start-db
+	@echo "Generating LaTeX weekly report..."
+	cd src/etl && python3 04_generate_report.py $(if $(US),--us,) $(if $(EU),--eu,)
+
 tsmom: start-db
 	@echo "Running TSMOM Execution Engine..."
 	cd src/etl && python3 04_tsmom_execution_engine.py

@@ -263,7 +263,70 @@ def assign_production_rating(row):
     
     return "HOLD"
 
-# --- 4. Main Pipeline Funnel ---
+
+def deduplicate_by_company(df: pd.DataFrame, engine) -> pd.DataFrame:
+    """
+    For companies listed on multiple exchanges, keep only the highest-market-cap ticker.
+
+    Queries dim_entities for company_name + market_cap, merges, groups by company
+    name (normalized), and keeps the row with highest market_cap per group.
+    Tickers with NULL company_name are kept individually (never collapsed).
+    """
+    from sqlalchemy import text
+    tickers = df['ticker'].tolist()
+    if not tickers:
+        return df
+
+    query = text("""
+        SELECT ticker, company_name, market_cap
+        FROM dim_entities
+        WHERE ticker IN :tickers
+    """)
+    with engine.connect() as conn:
+        meta = pd.read_sql(query, conn, params={'tickers': tuple(tickers)})
+
+    merged = df.merge(meta, on='ticker', how='left')
+
+    # For rows with a known company_name, dedup by name keeping highest market_cap
+    has_name = merged['company_name'].notna()
+    no_name = merged[~has_name].copy()
+    has_name_df = merged[has_name].copy()
+
+    if not has_name_df.empty:
+        has_name_df['_name_key'] = has_name_df['company_name'].str.strip().str.upper()
+        idx = has_name_df.groupby('_name_key')['market_cap'].idxmax()
+        has_name_df = has_name_df.loc[idx].drop(columns=['_name_key'])
+
+    result = pd.concat([no_name, has_name_df], ignore_index=True)
+    result = result.drop(columns=['company_name', 'market_cap'])
+    return result
+
+
+# --- 4. Rank Normalization Utility (hoisted for module-level use) ---
+def rank_normalize(s):
+    """Rank-based normalization. Maps percentile rank to z-score-like scale [-3, +3].
+    Uses Abramowitz & Stegun approximation for the standard normal quantile
+    function — no scipy dependency."""
+    n = len(s)
+    if n < 2:
+        return s * 0.0
+    # Rank from 1..n, convert to percentile (0..1) exclusive at both ends
+    ranks = s.rank(method='average')
+    p = (ranks - 0.5) / n
+    p = p.clip(1e-6, 1 - 1e-6)
+    # Abramowitz & Stegun approximation for inverse normal CDF
+    # (accurate to ~1e-4)
+    t = np.where(p < 0.5, p, 1 - p)
+    t = np.sqrt(-2 * np.log(t))
+    c0, c1, c2 = 2.515517, 0.802853, 0.010328
+    d1, d2, d3 = 1.432788, 0.189269, 0.001308
+    z = t - (c0 + c1*t + c2*t**2) / (1 + d1*t + d2*t**2 + d3*t**3)
+    z = np.where(p < 0.5, -z, z)
+    # Clip extreme values
+    z = np.clip(z, -3.5, 3.5)
+    return z
+
+# --- 5. Main Pipeline Funnel ---
 import time
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -342,29 +405,6 @@ def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500, us_only=
     # Converts each factor to its percentile rank mapped to approx [-3, +3].
     # Unlike z-score, this is stable regardless of pool composition — a stock's rank
     # depends only on its position relative to peers, not on the pool's mean/std.
-    def rank_normalize(s):
-        """Rank-based normalization. Maps percentile rank to z-score-like scale [-3, +3].
-        Uses Abramowitz & Stegun approximation for the standard normal quantile
-        function — no scipy dependency."""
-        n = len(s)
-        if n < 2:
-            return s * 0.0
-        # Rank from 1..n, convert to percentile (0..1) exclusive at both ends
-        ranks = s.rank(method='average')
-        p = (ranks - 0.5) / n
-        p = p.clip(1e-6, 1 - 1e-6)
-        # Abramowitz & Stegun approximation for inverse normal CDF
-        # (accurate to ~1e-4)
-        t = np.where(p < 0.5, p, 1 - p)
-        t = np.sqrt(-2 * np.log(t))
-        c0, c1, c2 = 2.515517, 0.802853, 0.010328
-        d1, d2, d3 = 1.432788, 0.189269, 0.001308
-        z = t - (c0 + c1*t + c2*t**2) / (1 + d1*t + d2*t**2 + d3*t**3)
-        z = np.where(p < 0.5, -z, z)
-        # Clip extreme values
-        z = np.clip(z, -3.5, 3.5)
-        return z
-    
     final_merged['z_mom_risk_adj'] = rank_normalize(final_merged['mom_score'].fillna(0))
     final_merged['z_mom_qual'] = rank_normalize(final_merged['mom_quality'].fillna(0))
     final_merged['z_accel'] = rank_normalize(final_merged['acceleration'].fillna(0))
@@ -416,6 +456,8 @@ if __name__ == "__main__":
 
     picks, status = get_today_best_buys(engine, us_only=args.us, eu_only=args.eu)
     
+    picks = deduplicate_by_company(picks, engine)
+    
     if picks is not None:
         pd.set_option('display.max_columns', None)
         pd.set_option('display.width', 1000)
@@ -433,3 +475,216 @@ if __name__ == "__main__":
         print("--- CURRENT PORTFOLIO AUDIT ---")
         print("="*50)
         print(status[display_cols].to_string(index=False))
+
+        # --- HIGH CONVICTION TABLE ---
+        # Top 20 STRONG BUY (any flavor), prioritized by:
+        #   1. Positive acceleration (fresh breakout over stale momentum)
+        #   2. Nearness to 52-week high (already breaking out)
+        #   3. final_score as tiebreaker
+        strong_buys = picks[picks['rating'].str.startswith('STRONG BUY')].copy()
+        strong_buys['accel_positive'] = strong_buys['acceleration'].fillna(0) > 0
+
+        conviction_cols = [
+            'ticker', 'sector', 'rating', 'final_score', 'near_high',
+            'acceleration', 'mom_score', 'eps_rev', 'peg', 'fwd_pe',
+            'rev_growth', 'op_margin'
+        ]
+
+        print("\n" + "="*50)
+        print("--- HIGH CONVICTION BUYS (Top 20 STRONG BUY) ---")
+        print("="*50)
+        print("  Prioritized: positive acceleration + near 52-week high + score")
+        print()
+
+        if strong_buys.empty:
+            print("  (No stocks passed all three STRONG BUY paths)")
+        else:
+            sorted_sb = strong_buys.sort_values(
+                ['accel_positive', 'near_high', 'final_score'],
+                ascending=[False, False, False]
+            ).head(20)
+            print(sorted_sb[conviction_cols].to_string(index=False))
+
+        # --- COMPOUNDER TABLE (1-3 Year Holds) ---
+        # High-quality businesses at good entry points (pulled back from highs,
+        # but thesis intact via positive revisions).
+        # Scoring prioritizes durable quality over momentum:
+        #   - Growth + margins (moat)
+        #   - ROE (capital efficiency)
+        #   - Low debt (safety)
+        #   - FCF yield (cash generation)
+        #   - Low PEG (reasonable valuation)
+        #   - Positive EPS revisions (thesis confirmed)
+        #
+        # Entry filter: near_high 0.50-0.88 (pullback) + eps_rev > 0 (intact thesis)
+        # Exclude SELL and HOLD rated stocks.
+        compounder_pool = picks[
+            (picks['pass_gate'])
+            & (picks['near_high'].fillna(0) >= 0.50)
+            & (picks['near_high'].fillna(0) <= 0.88)
+            & (picks['eps_rev'].fillna(0) > 0)
+            & ~picks['rating'].str.startswith('SELL')
+            & ~picks['rating'].str.startswith('HOLD')
+        ].copy()
+
+        if not compounder_pool.empty:
+            # Score: quality * 0.40 + financial strength * 0.25 + value * 0.15 + revisions * 0.20
+            compounder_pool['z_quality'] = rank_normalize(
+                compounder_pool['rev_growth'].fillna(0).clip(0, 0.5) * 0.4 +
+                compounder_pool['op_margin'].fillna(0).clip(0, 0.3) * 0.3 +
+                compounder_pool['profit_margin'].fillna(0).clip(0, 0.3) * 0.3
+            )
+            compounder_pool['z_roe'] = rank_normalize(compounder_pool['roe'].fillna(0).clip(-0.5, 1.0))
+            compounder_pool['z_safety'] = rank_normalize(
+                -compounder_pool['debt_to_equity'].fillna(0).clip(0, 5)
+            )
+            compounder_pool['z_fcf'] = rank_normalize(compounder_pool['fcf_yield'].fillna(0).clip(0, 0.3))
+            compounder_pool['z_peg'] = rank_normalize(
+                -compounder_pool['peg'].fillna(99).clip(0, 10)
+            )
+            compounder_pool['z_revisions'] = rank_normalize(compounder_pool['eps_rev'].fillna(0))
+
+            compounder_pool['compound_score'] = (
+                compounder_pool['z_quality']   * 0.25 +
+                compounder_pool['z_roe']       * 0.15 +
+                compounder_pool['z_safety']    * 0.10 +
+                compounder_pool['z_fcf']       * 0.15 +
+                compounder_pool['z_peg']       * 0.15 +
+                compounder_pool['z_revisions'] * 0.20
+            )
+
+            compound_cols = [
+                'ticker', 'sector', 'rating', 'compound_score', 'near_high',
+                'rev_growth', 'op_margin', 'roe', 'debt_to_equity',
+                'fcf_yield', 'peg', 'fwd_pe', 'eps_rev'
+            ]
+
+            top_compounders = compounder_pool.sort_values(
+                'compound_score', ascending=False
+            ).head(20)
+
+            print("\n" + "="*50)
+            print("--- COMPOUNDER PICKS (Top 20 — 1-3 Year Holds) ---")
+            print("="*50)
+            print("  Filtered: near_high 0.50-0.88 (pullback entry)")
+            print("  Thesis filter: positive EPS revisions")
+            print("  Sorted by: compound quality score (growth + margins + ROE + FCF + safety + value)")
+            print()
+            print(top_compounders[compound_cols].to_string(index=False))
+        else:
+            print("\n" + "="*50)
+            print("--- COMPOUNDER PICKS (1-3 Year Holds) ---")
+            print("="*50)
+            print("  (No stocks meet both pullback entry and intact-thesis criteria)")
+            print("  near_high range: 0.50-0.88")
+            print()
+
+        # --- TECH TITANS ---
+        tech_sectors = ['Technology', 'Semiconductors', 'Electronic Technology', 'Technology Services']
+        tech_pool = picks[
+            picks['sector'].isin(tech_sectors)
+            & (picks['rating'].str.startswith('STRONG BUY') | picks['rating'].str.startswith('BUY'))
+        ].copy()
+
+        tech_cols = ['ticker', 'rating', 'final_score', 'near_high', 'rev_growth', 'op_margin', 'peg', 'fwd_pe', 'eps_rev']
+
+        print("\n" + "="*50)
+        print("--- TECH TITANS (Top 10 Tech — STRONG BUY + BUY) ---")
+        print("="*50)
+        print("  Sorted by final_score (momentum + quality confluence)")
+        print()
+
+        if tech_pool.empty:
+            print("  (No tech stocks passed the filters this week)")
+        else:
+            top_tech = tech_pool.sort_values('final_score', ascending=False).head(10)
+            print(top_tech[tech_cols].to_string(index=False))
+
+        # --- DEFENSIVE COMPOUNDERS ---
+        def_sectors = ['Healthcare', 'Consumer Defensive', 'Utilities', 'Medical', 'Consumer Staples']
+        def_pool = picks[
+            picks['sector'].isin(def_sectors)
+            & picks['pass_gate']
+            & (picks['near_high'].fillna(0) >= 0.50)
+            & (picks['near_high'].fillna(0) <= 0.88)
+            & ~picks['rating'].str.startswith('SELL')
+            & ~picks['rating'].str.startswith('HOLD')
+        ].copy()
+
+        def_cols = ['ticker', 'sector', 'rating', 'final_score', 'near_high', 'roe', 'debt_to_equity', 'fcf_yield', 'peg', 'eps_rev']
+
+        print("\n" + "="*50)
+        print("--- DEFENSIVE COMPOUNDERS (Top 10 — Pullback Entry) ---")
+        print("="*50)
+        print("  Sorted by final_score, filtered: near_high 0.50-0.88 + RiskGate pass")
+        print()
+
+        if def_pool.empty:
+            print("  (No defensive stocks meet pullback + quality criteria)")
+        else:
+            top_def = def_pool.sort_values('final_score', ascending=False).head(10)
+            print(top_def[def_cols].to_string(index=False))
+
+        # --- THE REVISIONIST ---
+        # Estiamte revisions: exclude any stock the algo rates SELL or HOLD.
+        rev_pool = picks[
+            picks['eps_rev'].notna() & (picks['eps_rev'] > 0)
+            & ~picks['rating'].str.startswith('SELL')
+            & ~picks['rating'].str.startswith('HOLD')
+        ].copy()
+
+        rev_cols = ['ticker', 'sector', 'eps_rev', 'rating', 'final_score', 'near_high', 'peg', 'fwd_pe']
+
+        print("\n" + "="*50)
+        print("--- THE REVISIONIST (Top 10 — Strongest EPS Estimate Revisions) ---")
+        print("="*50)
+        print("  Sorted by estimate revision strength (positive = analysts raising)")
+        print()
+
+        if rev_pool.empty:
+            print("  (No stocks with positive EPS revisions this week)")
+        else:
+            top_rev = rev_pool.sort_values('eps_rev', ascending=False).head(10)
+            print(top_rev[rev_cols].to_string(index=False))
+
+        # --- DEEP VALUE MOMENTUM ---
+        # Exclude SELL and HOLD rated stocks.
+        value_pool = picks[
+            (picks['peg'].fillna(99) < 1.0)
+            & (picks['mom_score'].fillna(0) > 0)
+            & (picks['fcf_yield'].fillna(0) > 0)
+            & ~picks['rating'].str.startswith('SELL')
+            & ~picks['rating'].str.startswith('HOLD')
+        ].copy()
+
+        value_cols = ['ticker', 'sector', 'rating', 'final_score', 'peg', 'fwd_pe', 'mom_score', 'fcf_yield', 'rev_growth', 'op_margin']
+
+        print("\n" + "="*50)
+        print("--- DEEP VALUE MOMENTUM (PEG < 1.0 + Mom > 0 + FCF > 0) ---")
+        print("="*50)
+        print("  Cheap + growing + cash-generating — ultra-rare combo")
+        print()
+
+        if value_pool.empty:
+            print("  (No stocks pass all three filters — extremely rare)")
+        else:
+            top_value = value_pool.sort_values('final_score', ascending=False).head(10)
+            print(top_value[value_cols].to_string(index=False))
+
+        # --- PORTFOLIO INSIDER WATCH ---
+        insider_pool = status[
+            status['rating'].str.startswith('STRONG BUY') | status['rating'].str.startswith('BUY')
+        ].copy()
+
+        insider_cols = ['ticker', 'sector', 'rating', 'final_score', 'near_high', 'acceleration', 'eps_rev', 'peg', 'fwd_pe']
+
+        print("\n" + "="*50)
+        print("--- PORTFOLIO INSIDER WATCH (What I'm Holding & Still Like) ---")
+        print("="*50)
+        print("  Current portfolio tickers rated STRONG BUY or BUY")
+        print()
+
+        if insider_pool.empty:
+            print("  (No held positions currently rated BUY or better)")
+        else:
+            print(insider_pool[insider_cols].to_string(index=False))
