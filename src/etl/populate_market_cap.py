@@ -19,37 +19,32 @@ DB_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg2:///alphapicks")
 engine = create_engine(DB_URL, pool_pre_ping=True)
 
 
+# Proactive request counter to stay under yfinance crumb expiry (~1800-2000 requests).
+REQUEST_COUNTER = 0
+REQUEST_LIMIT = 1900
+COOLDOWN_SECONDS = 180
+
+
 def refresh_yfinance_session():
     """Force yfinance to get a fresh crumb/session."""
     try:
-        # Clear the cached session so yfinance creates a new one
         if hasattr(yf, 'shared') and hasattr(yf.shared, '_session'):
             yf.shared._session = None
     except Exception:
         pass
 
 
-def fetch_market_cap(ticker, max_retries=3):
-    """Fetch market cap for a single ticker. Retries on 401 with backoff."""
-    import requests
-    for attempt in range(max_retries):
-        try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            mcap = info.get("marketCap")
-            return (ticker, mcap)
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 401 and attempt < max_retries - 1:
-                wait = 2 ** (attempt + 2)  # 4s, 8s, 16s
-                print(f"  ! 401 on {ticker}, retrying in {wait}s (attempt {attempt + 2}/{max_retries})...")
-                # Force a fresh session before retry
-                refresh_yfinance_session()
-                time.sleep(wait)
-                continue
-            return (ticker, None)
-        except Exception:
-            return (ticker, None)
-    return (ticker, None)
+def fetch_market_cap(ticker):
+    """Fetch market cap for a single ticker. Returns (ticker, market_cap) or (ticker, None)."""
+    global REQUEST_COUNTER
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        REQUEST_COUNTER += 1
+        mcap = info.get("marketCap")
+        return (ticker, mcap)
+    except Exception:
+        return (ticker, None)
 
 
 def main():
@@ -85,6 +80,7 @@ def main():
     total = len(tickers)
     print(f"Found {total} tickers to process.")
 
+    global REQUEST_COUNTER
     updated = 0
     skipped = 0
 
@@ -92,51 +88,28 @@ def main():
     while i < total:
         batch = tickers[i: i + args.batch]
 
-        # Batch-level retry loop: when yfinance session expires (all 401s),
-        # wait and retry the same batch instead of skipping those tickers.
-        batch_retries = 0
-        max_batch_retries = 5
-        final_results = None
+        # Proactive cooldown: before this batch would push us over the limit,
+        # pause and refresh the session. This prevents 401s entirely.
+        if REQUEST_COUNTER >= REQUEST_LIMIT:
+            print(f"  Proactive cooldown: {REQUEST_COUNTER} requests made, "
+                  f"pausing {COOLDOWN_SECONDS}s to refresh yfinance session...")
+            refresh_yfinance_session()
+            time.sleep(COOLDOWN_SECONDS)
+            REQUEST_COUNTER = 0
 
-        while batch_retries <= max_batch_retries:
-            results = []
+        results = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_map = {executor.submit(fetch_market_cap, t): t for t in batch}
+            for future in as_completed(future_map):
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    print(f"  ! Error: {e}")
+                    results.append((future_map[future], None))
 
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                future_map = {executor.submit(fetch_market_cap, t): t for t in batch}
-                for future in as_completed(future_map):
-                    try:
-                        results.append(future.result())
-                    except Exception as e:
-                        print(f"  ! Error: {e}")
-                        results.append((future_map[future], None))
-
-            batch_failures = sum(1 for _, mcap in results if mcap is None)
-            fail_rate = batch_failures / len(batch) if batch else 0
-
-            batch_num = i // args.batch + 1
-            total_batches = (total + args.batch - 1) // args.batch
-
-            # If nearly all failed, retry the batch after a long cooldown
-            if fail_rate >= 0.9 and batch_retries < max_batch_retries:
-                batch_retries += 1
-                cooldown = 180 * (2 ** (batch_retries - 1))  # 180s, 360s, 720s, 1440s, 2880s
-                print(f"  Batch {batch_num}/{total_batches}: {batch_failures}/{len(batch)} failed, "
-                      f"retry {batch_retries}/{max_batch_retries} after {cooldown}s cooldown...")
-                refresh_yfinance_session()
-                time.sleep(cooldown)
-            else:
-                # Accept this result — good enough or gave up after max retries
-                final_results = results
-                time.sleep(3.0)
-                break
-
-        # If we exhausted retries without ever accepting, use the last result
-        if final_results is None:
-            final_results = results
-
-        # Commit whatever we got for this batch (only once)
+        # Commit batch results
         with engine.begin() as conn:
-            for ticker, mcap in final_results:
+            for ticker, mcap in results:
                 if mcap is not None and mcap > 0:
                     conn.execute(
                         text("UPDATE dim_entities SET market_cap = :mcap WHERE ticker = :ticker"),
@@ -151,6 +124,7 @@ def main():
         print(f"  Batch {batch_num}/{total_batches}: "
               f"{updated} updated, {skipped} skipped so far")
 
+        time.sleep(3.0)
         i += args.batch
 
     print(f"\nDone. Updated: {updated}, Skipped (no data): {skipped}")
