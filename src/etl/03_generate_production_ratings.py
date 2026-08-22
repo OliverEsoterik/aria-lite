@@ -459,6 +459,7 @@ if __name__ == "__main__":
     picks, status = get_today_best_buys(engine, us_only=args.us, eu_only=args.eu)
     
     picks = deduplicate_by_company(picks, engine)
+    picks = picks.sort_values('final_score', ascending=False)
     
     if picks is not None:
         pd.set_option('display.max_columns', None)
