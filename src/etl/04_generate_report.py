@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from sqlalchemy import create_engine
 _mod03 = __import__('03_generate_production_ratings')
 get_today_best_buys = _mod03.get_today_best_buys
+deduplicate_by_company = _mod03.deduplicate_by_company
 rank_normalize = _mod03.rank_normalize
 CURRENT_PORTFOLIO = _mod03.CURRENT_PORTFOLIO
 
@@ -232,6 +233,8 @@ def main() -> None:
     picks, status = get_today_best_buys(
         _make_engine(), us_only=args.us, eu_only=args.eu
     )
+
+    picks = deduplicate_by_company(picks, _make_engine())
 
     if picks is None:
         print("% No data returned from pipeline.")
