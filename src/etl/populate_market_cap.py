@@ -59,13 +59,24 @@ def main():
                         help="Re-fetch market cap for all tickers (default: only missing)")
     args = parser.parse_args()
 
-    # Default: skip tickers that already have market_cap. Use --refresh-all to re-process everything.
+    # Default: skip tickers that already have market_cap, and only process tickers
+    # that exist in market_prices (tickers with no price data can't pass the pipeline anyway).
+    # Use --refresh-all to re-process everything that has price data.
     if args.refresh_all:
-        query = "SELECT ticker FROM dim_entities ORDER BY entity_pk ASC"
-        print("Refresh-all mode: processing ALL tickers...")
+        query = """
+            SELECT ticker FROM dim_entities
+            WHERE ticker IN (SELECT DISTINCT ticker FROM market_prices)
+            ORDER BY entity_pk ASC
+        """
+        print("Refresh-all mode: processing ALL tickers with price data...")
     else:
-        query = "SELECT ticker FROM dim_entities WHERE market_cap IS NULL ORDER BY entity_pk ASC"
-        print("Default mode: skipping tickers with existing market_cap. Use --refresh-all to override.")
+        query = """
+            SELECT ticker FROM dim_entities
+            WHERE market_cap IS NULL
+              AND ticker IN (SELECT DISTINCT ticker FROM market_prices)
+            ORDER BY entity_pk ASC
+        """
+        print("Default mode: processing only tickers with price data and missing market_cap.")
 
     with engine.connect() as conn:
         result = conn.execute(text(query))
