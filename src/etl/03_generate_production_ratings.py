@@ -294,6 +294,8 @@ def deduplicate_by_company(df: pd.DataFrame, engine) -> pd.DataFrame:
 
     if not has_name_df.empty:
         has_name_df['_name_key'] = has_name_df['company_name'].str.strip().str.upper()
+        # Use skipna=False so that a group where all market_cap are NaN
+        # raises a clear error instead of silently failing.
         idx = has_name_df.groupby('_name_key')['market_cap'].idxmax()
         has_name_df = has_name_df.loc[idx].drop(columns=['_name_key'])
 
