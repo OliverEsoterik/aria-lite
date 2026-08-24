@@ -674,6 +674,51 @@ if __name__ == "__main__":
             top_value = value_pool.sort_values('final_score', ascending=False).head(10)
             print(top_value[value_cols].to_string(index=False))
 
+        # --- TOP OF THE TOPS (unified 1-2 year hold) ---
+        top_pool = picks[
+            picks['rating'].str.startswith('STRONG BUY')
+            & (picks['near_high'].fillna(0) > 0.70)
+            & (picks['near_high'].fillna(0) < 0.97)
+        ].copy()
+
+        top_cols = ['top_score', 'final_score', 'near_high', 'rev_growth', 'op_margin',
+                    'roe', 'peg', 'fwd_pe', 'eps_rev', 'acceleration']
+
+        print("\n" + "="*50)
+        print("--- TOP OF THE TOPS (Top 10 — 1-2 Year Hold) ---")
+        print("="*50)
+        print("  STRONG BUY + trend alive (near_high 0.70-0.97)")
+        print("  Scored: momentum 25% + quality 30% + valuation 20% + thesis intact 25%")
+        print()
+
+        if top_pool.empty:
+            print("  (No stocks pass all filters this week)")
+        else:
+            top_pool['z_quality'] = rank_normalize(
+                top_pool['rev_growth'].fillna(0).clip(0, 0.5) * 0.4 +
+                top_pool['op_margin'].fillna(0).clip(0, 0.3) * 0.3 +
+                top_pool['profit_margin'].fillna(0).clip(0, 0.3) * 0.3
+            )
+            top_pool['z_roe'] = rank_normalize(top_pool['roe'].fillna(0).clip(-0.5, 1.0))
+            top_pool['z_peg'] = rank_normalize(-top_pool['peg'].fillna(99).clip(0, 10))
+            top_pool['z_pe'] = rank_normalize(-top_pool['fwd_pe'].fillna(999).clip(0, 100))
+            top_pool['z_revisions'] = rank_normalize(top_pool['eps_rev'].fillna(0))
+            top_pool['z_accel'] = rank_normalize(top_pool['acceleration'].fillna(0))
+            top_pool['z_final'] = rank_normalize(top_pool['final_score'].fillna(0))
+
+            top_pool['top_score'] = (
+                top_pool['z_final']     * 0.25
+                + top_pool['z_quality'] * 0.20
+                + top_pool['z_roe']     * 0.10
+                + top_pool['z_peg']     * 0.10
+                + top_pool['z_pe']      * 0.10
+                + top_pool['z_revisions'] * 0.15
+                + top_pool['z_accel']   * 0.10
+            )
+
+            top_result = top_pool.sort_values('top_score', ascending=False).head(10)
+            print(top_result[['ticker', 'sector', 'rating'] + top_cols].to_string(index=False))
+
         # --- PORTFOLIO INSIDER WATCH ---
         insider_pool = status[
             status['rating'].str.startswith('STRONG BUY') | status['rating'].str.startswith('BUY')
