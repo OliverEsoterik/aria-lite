@@ -28,14 +28,15 @@ TICKER_MAP = {
 
 
 def fetch_training_data(ticker: str = "SPY", years: int = 10) -> np.ndarray:
-    """Fetch daily returns for a given index and VIX levels from yfinance.
+    """Fetch daily returns, VIX levels, VIX log-returns, and realized vol.
 
     Args:
         ticker: Index ticker (SPY, SOX, or NDX).
         years: Years of historical data.
 
     Returns:
-        Array of shape (n_days, 2) with columns [<ticker>_log_return, vix_close].
+        Array of shape (n_days, 4) with columns:
+        [<ticker>_log_return, vix_close, vix_log_return, realized_vol].
     """
     yf_ticker = TICKER_MAP[ticker]
     name_lower = ticker.lower()
@@ -59,10 +60,18 @@ def fetch_training_data(ticker: str = "SPY", years: int = 10) -> np.ndarray:
     df[f"{name_lower}_return"] = np.log(
         df[f"{name_lower}_close"] / df[f"{name_lower}_close"].shift(1)
     )
+    df["vix_log_return"] = np.log(
+        df["vix_close"] / df["vix_close"].shift(1)
+    )
+    # 20-day rolling realized volatility of daily log returns
+    df["realized_vol"] = (
+        df[f"{name_lower}_return"].rolling(window=20).std()
+    )
     df = df.dropna()
 
-    features = df[[f"{name_lower}_return", "vix_close"]].values
-    return features
+    return df[
+        [f"{name_lower}_return", "vix_close", "vix_log_return", "realized_vol"]
+    ].values
 
 
 def _label_states(model: hmm.GaussianHMM) -> list[str]:
@@ -157,7 +166,7 @@ def train_regime_model(
         "model": model,
         "scaler": scaler,
         "state_labels": state_labels,
-        "feature_names": [f"{name_lower}_log_return", "vix_close"],
+        "feature_names": [f"{name_lower}_log_return", "vix_close", "vix_log_return", "realized_vol"],
         "training_date": datetime.now().isoformat(),
         "ticker": ticker,
     }
