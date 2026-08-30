@@ -17,6 +17,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 from hmmlearn import hmm
+from scipy.optimize import linear_sum_assignment
+from scipy.spatial.distance import cdist
 from sklearn.preprocessing import StandardScaler
 
 
@@ -72,6 +74,60 @@ def fetch_training_data(ticker: str = "SPY", years: int = 10) -> np.ndarray:
     return df[
         [f"{name_lower}_return", "vix_close", "vix_log_return", "realized_vol"]
     ].values
+
+
+# Prototype mean vectors in standardized feature space.
+# Order: [log_return, vix_close, vix_log_return, realized_vol]
+# Each row describes the expected signature of one regime.
+_PROTOTYPES = np.array([
+    [ 0.8, -0.5, -0.5, -0.7],   # Low-Vol Bull: high return, low VIX, low vol
+    [ 0.5,  0.0,  0.0,  0.7],   # High-Vol Bull: positive return, elevated vol
+    [ 0.0, -0.3,  0.0, -0.3],   # Low-Vol Sideways: flat return, quiet
+    [ 0.0,  0.5,  0.0,  0.5],   # High-Vol Sideways: flat return, choppy
+    [-0.5,  0.3,  0.5,  0.3],   # Low-Vol Bear: negative return, moderate vol
+    [-0.8,  0.8,  0.7,  0.7],   # High-Vol Bear: strongly negative, high vol
+])
+
+_REGIME_LABELS = [
+    "Low-Vol Bull",
+    "High-Vol Bull",
+    "Low-Vol Sideways",
+    "High-Vol Sideways",
+    "Low-Vol Bear",
+    "High-Vol Bear",
+]
+
+
+def _assign_regime_labels(model: hmm.GaussianHMM) -> list[str]:
+    """Assign interpretable regime labels via Hungarian prototype matching.
+
+    Computes pairwise Euclidean distances between the 6 learned emission
+    means and 6 prototype vectors, then runs linear sum assignment to find
+    the optimal 1-to-1 mapping. This is deterministic across retraining
+    runs — same means_ always produces same labels.
+
+    Args:
+        model: Fitted GaussianHMM with means_ attribute of shape (6, n_features).
+
+    Returns:
+        List of 6 label strings, index-aligned with model.means_.
+
+    Raises:
+        ValueError: If model has != 6 components.
+    """
+    if model.n_components != 6:
+        raise ValueError(
+            f"Expected 6 components for regime labeling, got {model.n_components}"
+        )
+
+    cost = cdist(model.means_, _PROTOTYPES, metric="euclidean")
+    row_idx, col_idx = linear_sum_assignment(cost)
+
+    labels = [""] * len(model.means_)
+    for learned_idx, proto_idx in zip(row_idx, col_idx):
+        labels[learned_idx] = _REGIME_LABELS[proto_idx]
+
+    return labels
 
 
 def _label_states(model: hmm.GaussianHMM) -> list[str]:
