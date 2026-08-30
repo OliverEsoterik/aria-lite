@@ -56,14 +56,15 @@ _GUIDANCE = {
 
 
 def fetch_recent_data(ticker: str = "SPY", lookback_days: int = 60) -> np.ndarray:
-    """Fetch recent index + VIX data for prediction.
+    """Fetch recent index + VIX data including vol metrics for prediction.
 
     Args:
         ticker: Index ticker (SPY, SOX, or NDX).
         lookback_days: Number of recent trading days to use.
 
     Returns:
-        Array of shape (lookback_days, 2) with [log_return, vix_close].
+        Array of shape (lookback_days, 4) with:
+        [log_return, vix_close, vix_log_return, realized_vol].
     """
     yf_ticker = TICKER_MAP[ticker]
     name_lower = ticker.lower()
@@ -81,12 +82,21 @@ def fetch_recent_data(ticker: str = "SPY", lookback_days: int = 60) -> np.ndarra
     df[f"{name_lower}_close"] = index_data["Close"]
     df["vix_close"] = vix["Close"]
     df = df.dropna()
-    df[f"{name_lower}_return"] = np.log(df[f"{name_lower}_close"] / df[f"{name_lower}_close"].shift(1))
+    df[f"{name_lower}_return"] = np.log(
+        df[f"{name_lower}_close"] / df[f"{name_lower}_close"].shift(1)
+    )
+    df["vix_log_return"] = np.log(
+        df["vix_close"] / df["vix_close"].shift(1)
+    )
+    df["realized_vol"] = (
+        df[f"{name_lower}_return"].rolling(window=20).std()
+    )
     df = df.dropna()
 
-    # Take the most recent `lookback_days` days
     recent = df.tail(lookback_days)
-    return recent[[f"{name_lower}_return", "vix_close"]].values
+    return recent[
+        [f"{name_lower}_return", "vix_close", "vix_log_return", "realized_vol"]
+    ].values
 
 
 def _regularize_transmat(transmat: np.ndarray, max_self: float = 0.99) -> np.ndarray:
@@ -153,7 +163,7 @@ def predict_regime(
     Args:
         params_path: Path to saved HMM parameters pickle.
         lookback_days: Number of recent trading days to use.
-        recent_observations: Optional pre-computed features (n_days, 2).
+        recent_observations: Optional pre-computed features (n_days, 4).
             If None, fetches from yfinance.
         forecast_horizons: List of forecast horizons in trading days.
         ticker: Index ticker (SPY, SOX, or NDX).
