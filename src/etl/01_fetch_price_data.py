@@ -5,6 +5,8 @@ import psycopg2.extras
 from typing import List, Dict, Optional
 from sqlalchemy import create_engine, text
 
+from european_ticker_config import get_suffix, EXCHANGE_CONFIG
+
 # --- Configuration ---
 DB_CONN_STR = os.environ.get("DATABASE_URL", "postgresql+psycopg2:///alphapicks")
 DEFAULT_START_DATE = (pd.Timestamp.today() - pd.DateOffset(years=10)).strftime('%Y-%m-%d')
@@ -12,14 +14,37 @@ DEFAULT_START_DATE = (pd.Timestamp.today() - pd.DateOffset(years=10)).strftime('
 CHUNK_SIZE = 200
 API_SLEEP_SECONDS = 0.7
 
-def load_tickers_from_db(engine, max_tickers: Optional[int] = None) -> List[Dict]:
-    """Fetch tickers from dim_entities ordered by market cap (entity_pk ASC).
+def load_tickers_from_db(engine, max_tickers: Optional[int] = None,
+                          us_only: bool = False,
+                          eu_only: bool = False,
+                          exchange: Optional[str] = None) -> List[Dict]:
+    """Fetch tickers from dim_entities.
 
     Returns a list of dicts with keys: ticker, entity_pk.
     If max_tickers is set, only the top N are returned.
+    If us_only is True, only US tickers (no dot suffix) are returned.
+    If eu_only is True, only European tickers (with dot suffix) are returned.
+    If exchange is set, only tickers for that EODHD exchange code.
     """
-    query = "SELECT ticker, entity_pk FROM dim_entities ORDER BY entity_pk ASC"
+    query = "SELECT ticker, entity_pk FROM dim_entities"
     params = {}
+    where_clauses = []
+    # Quality floor: only tickers with known market cap >= $500M
+    where_clauses.append("market_cap IS NOT NULL AND market_cap >= 500000000")
+    if us_only:
+        where_clauses.append("ticker NOT LIKE '%\\.%'")
+    if eu_only:
+        where_clauses.append("ticker LIKE '%\\.%'")
+    if exchange:
+        suffix = get_suffix(exchange, "")
+        if suffix:
+            where_clauses.append(f"ticker LIKE '%{suffix}'")
+        else:
+            print(f"   ! Unknown exchange code '{exchange}', no suffix mapping.")
+            return []
+    if where_clauses:
+        query += " WHERE " + " AND ".join(where_clauses)
+    query += " ORDER BY entity_pk ASC"
     if max_tickers:
         query += " LIMIT :max_tickers"
         params = {"max_tickers": max_tickers}
@@ -177,6 +202,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Fetch price data from yfinance")
     parser.add_argument("--max", type=int, default=None,
                         help="Maximum number of tickers to process (default: all)")
+    parser.add_argument("--us", action="store_true",
+                        help="Only process US tickers (no suffix, e.g. AAPL)")
+    parser.add_argument("--eu", action="store_true",
+                        help="Only process European tickers (with dot suffix, e.g. SIE.DE)")
+    parser.add_argument("--exchange", type=str, default=None,
+                        help="Only process tickers for a specific EODHD exchange code (e.g. LSE, XETRA, WAR)")
     return parser.parse_args()
 
 
@@ -187,7 +218,10 @@ def main():
     engine = create_engine(DB_CONN_STR, pool_pre_ping=True)
 
     # Load tickers from DB instead of JSON file
-    ticker_rows = load_tickers_from_db(engine, max_tickers=args.max)
+    ticker_rows = load_tickers_from_db(engine, max_tickers=args.max,
+                                  us_only=args.us,
+                                  eu_only=args.eu,
+                                  exchange=args.exchange)
     if not ticker_rows:
         print(">>> No tickers to process. Exiting.")
         return

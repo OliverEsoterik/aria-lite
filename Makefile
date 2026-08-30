@@ -1,12 +1,14 @@
-.PHONY: setup start-db stop-db stop status migrate run ratings tsmom tsmom-weights tsmom-positions clean \
+.PHONY: setup start-db stop-db stop status migrate run update-sec-tickers update-eu-tickers populate-market-cap ratings tsmom tsmom-weights tsmom-positions clean \
 	hmm-train-regime hmm-predict-regime hmm-train-trend hmm-train-trend-all \
 	hmm-predict-trend hmm-predict-trend-all
 
 SEC_USER_AGENT_EMAIL ?= your.email@address.com
 MAX ?=
+US ?=
+EU ?=
 
 setup: start-db migrate
-	SEC_USER_AGENT_EMAIL=$(SEC_USER_AGENT_EMAIL) ./scripts/run_etl.sh $(if $(filter-out 0,$(MAX)),--max $(MAX),)
+	SEC_USER_AGENT_EMAIL=$(SEC_USER_AGENT_EMAIL) ./scripts/run_etl.sh $(if $(filter-out 0,$(MAX)),--max $(MAX),) $(if $(US),--us,) $(if $(EU),--eu,) $(if $(EXCHANGE),--exchange $(EXCHANGE),)
 
 start-db:
 	@if [ ! -d "$(DB_PATH)" ]; then \
@@ -54,7 +56,28 @@ migrate: start-db
 
 run: start-db
 	@echo "Running daily services..."
-	./scripts/run_etl.sh --skip-entities $(if $(filter-out 0,$(MAX)),--max $(MAX),)
+	./scripts/run_etl.sh --skip-entities $(if $(filter-out 0,$(MAX)),--max $(MAX),) $(if $(US),--us,) $(if $(EU),--eu,) $(if $(EXCHANGE),--exchange $(EXCHANGE),)
+
+update-sec-tickers: start-db
+	@echo "Updating SEC tickers..."
+	SEC_USER_AGENT_EMAIL=$(SEC_USER_AGENT_EMAIL) \
+		cd src/etl && python3 00_populate_entities.py
+
+update-eu-tickers: start-db
+	@test -n "$(EODHD_API_TOKEN)" || (echo "[ERROR] EODHD_API_TOKEN not set" && exit 1)
+	@echo "Updating European tickers from EODHD..."
+	SEC_USER_AGENT_EMAIL=$(SEC_USER_AGENT_EMAIL) \
+		EODHD_API_TOKEN=$(EODHD_API_TOKEN) \
+		cd src/etl && python3 00_populate_european_entities.py \
+		$(if $(EXCHANGES),--exchanges $(EXCHANGES),)
+
+populate-market-cap: start-db
+	@echo "Populating market cap from yfinance..."
+	cd src/etl && python3 populate_market_cap.py $(if $(REFRESH_ALL),--refresh-all,)
+
+populate-market-cap-refresh: start-db
+	@echo "Refreshing ALL market caps from yfinance..."
+	cd src/etl && python3 populate_market_cap.py --refresh-all
 
 statistics: start-db
 	@echo "Computing statistics..."
@@ -62,7 +85,11 @@ statistics: start-db
 
 ratings: start-db
 	@echo "Generating production ratings..."
-	cd src/etl && python3 03_generate_production_ratings.py
+	cd src/etl && python3 03_generate_production_ratings.py $(if $(US),--us,) $(if $(EU),--eu,)
+
+weekly-report: start-db
+	@echo "Generating Markdown weekly report..."
+	cd src/etl && python3 04_generate_report.py $(if $(US),--us,) $(if $(EU),--eu,)
 
 tsmom: start-db
 	@echo "Running TSMOM Execution Engine..."
