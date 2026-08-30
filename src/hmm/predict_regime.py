@@ -30,29 +30,64 @@ ALL_TICKERS = ["SPY", "SOX", "NDX"]
 
 
 # Portfolio guidance templates per regime
-_GUIDANCE = {
-    "BULL": {
-        "state": "BULL",
+_GUIDANCE: dict[str, dict[str, str]] = {
+    "Low-Vol Bull": {
+        "state": "Low-Vol Bull",
         "deployment": "Full capital deployment",
-        "strategy": "Momentum strategies favored",
+        "strategy": "Momentum ideal — low vol confirms conviction",
         "hold_period": "Normal hold periods",
-        "caution": "Monitor for signs of exhaustion",
+        "caution": "",
     },
-    "BEAR": {
-        "state": "BEAR",
-        "deployment": "Raise cash, reduce position sizes",
-        "strategy": "Quality/defensive factors over raw momentum",
-        "hold_period": "Shorten hold periods, tighten stops",
-        "caution": "Avoid catching falling knives",
+    "High-Vol Bull": {
+        "state": "High-Vol Bull",
+        "deployment": "Full deployment, tighter stops",
+        "strategy": "Momentum works but reversion risk elevated",
+        "hold_period": "Shorten holds, tighten stops",
+        "caution": "Elevated vol suggests late-cycle dynamics",
     },
-    "SIDEWAYS": {
-        "state": "SIDEWAYS",
-        "deployment": "Moderate deployment, selective positions",
-        "strategy": "Fundamentals over momentum",
-        "hold_period": "Reduce hold periods, take profits faster",
-        "caution": "Range-bound — mean reversion risk elevated",
+    "Low-Vol Sideways": {
+        "state": "Low-Vol Sideways",
+        "deployment": "Selective, reduced exposure",
+        "strategy": "Mean-reversion / range trading",
+        "hold_period": "Short holds, take profits",
+        "caution": "Range likely persists",
+    },
+    "High-Vol Sideways": {
+        "state": "High-Vol Sideways",
+        "deployment": "Reduce aggressively, raise cash",
+        "strategy": "Wait for breakout",
+        "hold_period": "Minimal — avoid chop",
+        "caution": "High vol in range precedes breakout or panic",
+    },
+    "Low-Vol Bear": {
+        "state": "Low-Vol Bear",
+        "deployment": "Raise cash, reduce positions",
+        "strategy": "Defensive / quality factors",
+        "hold_period": "Short holds, tight stops",
+        "caution": "Don't catch falling knives",
+    },
+    "High-Vol Bear": {
+        "state": "High-Vol Bear",
+        "deployment": "Near-minimal deployment",
+        "strategy": "Cash is the winning position",
+        "hold_period": "No new positions",
+        "caution": "Capitulation risk — wait for vol to subside",
     },
 }
+
+
+
+def _directional(label: str) -> str:
+    """Extract the directional component from a 6-state label.
+
+    'Low-Vol Bull' -> 'BULL', 'High-Vol Bear' -> 'BEAR', etc.
+    Falls back to the label as-is if no direction is found.
+    """
+    for direction in ["Bull", "Bear", "Sideways"]:
+        if direction in label:
+            return direction.upper()
+    return label.upper()
+
 
 
 def fetch_recent_data(ticker: str = "SPY", lookback_days: int = 60) -> np.ndarray:
@@ -221,7 +256,7 @@ def predict_regime(
     persistence = float(model.transmat_[current_state_idx, current_state_idx])
 
     # Guidance
-    guidance = _GUIDANCE.get(state_label, _GUIDANCE["SIDEWAYS"])
+    guidance = _GUIDANCE.get(state_label, _GUIDANCE["Low-Vol Sideways"])
 
     # Forecast
     forecast = compute_forecast(model, current_probs, forecast_horizons)
@@ -250,7 +285,7 @@ def print_report(result: dict) -> None:
     forecast = result["forecast"]
 
     prob_str = "  |  ".join(
-        f"{labels[i]}: {probs[i]*100:.0f}%"
+        f"{labels[i]:20s} {probs[i]*100:.0f}%"
         for i in range(len(labels))
     )
 
@@ -310,9 +345,12 @@ def print_comparison_report(results: list[dict]) -> None:
         conf = f"{r['confidence']*100:.0f}%"
         labels = r["state_labels"]
         f30 = r["forecast"].get(30, [])
+        f30_state_probs = sorted(
+            zip(labels, f30), key=lambda x: x[1], reverse=True
+        )[:3]
         f30_str = " ".join(
-            f"{labels[i]}{f30[i]*100:.0f}%"
-            for i in range(min(len(labels), len(f30)))
+            f"{l}{p*100:.0f}%"
+            for l, p in f30_state_probs
         )
         persist = f"{r['persistence']*100:.0f}%"
         print(f"  {ticker:<8} {state:<12} {conf:<8} {f30_str:<24} {persist:<8}")
@@ -322,9 +360,9 @@ def print_comparison_report(results: list[dict]) -> None:
 
     # Heuristic: flag if SPY and SOX disagree
     if len(results) >= 2:
-        spy_state = next((r["state"] for r in results if r["ticker"] == "SPY"), None)
-        sox_state = next((r["state"] for r in results if r["ticker"] == "SOX"), None)
-        ndx_state = next((r["state"] for r in results if r["ticker"] == "NDX"), None)
+        spy_state = _directional(next((r["state"] for r in results if r["ticker"] == "SPY"), ""))
+        sox_state = _directional(next((r["state"] for r in results if r["ticker"] == "SOX"), ""))
+        ndx_state = _directional(next((r["state"] for r in results if r["ticker"] == "NDX"), ""))
 
         if spy_state and sox_state:
             if spy_state == sox_state:
