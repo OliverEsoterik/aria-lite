@@ -158,7 +158,7 @@ def _label_states(model: hmm.GaussianHMM) -> list[str]:
 def train_regime_model(
     features: Optional[np.ndarray] = None,
     save_path: str = "data/hmm_regime_params.pkl",
-    n_states: int = 3,
+    n_states: int = 6,
     n_iter: int = 100,
     n_restarts: int = 5,
     ticker: str = "SPY",
@@ -168,7 +168,7 @@ def train_regime_model(
     Args:
         features: Array of shape (n_days, n_features). If None, fetches from yfinance.
         save_path: Where to save the trained model pickle.
-        n_states: Number of hidden states (default: 3).
+        n_states: Number of hidden states (default: 6).
         n_iter: EM iterations per restart.
         n_restarts: Random restarts to avoid local optima.
         ticker: Index ticker (SPY, SOX, or NDX).
@@ -196,7 +196,22 @@ def train_regime_model(
         init_params="stmc",
         params="stmc",
     )
-    model.fit(scaled)
+    try:
+        model.fit(scaled)
+    except ValueError as e:
+        if "covariance" in str(e).lower():
+            print("[WARN] Singular covariance with full covariance_type, retrying with diag.")
+            model = hmm.GaussianHMM(
+                n_components=n_states,
+                covariance_type="diag",
+                n_iter=n_iter,
+                random_state=42,
+                init_params="stmc",
+                params="stmc",
+            )
+            model.fit(scaled)
+        else:
+            raise
     best_score = model.score(scaled)
 
     # Multiple restarts: keep the best model
@@ -209,14 +224,28 @@ def train_regime_model(
             init_params="stmc",
             params="stmc",
         )
-        trial.fit(scaled)
+        try:
+            trial.fit(scaled)
+        except ValueError as e:
+            if "covariance" in str(e).lower():
+                trial = hmm.GaussianHMM(
+                    n_components=n_states,
+                    covariance_type="diag",
+                    n_iter=n_iter,
+                    random_state=42 + i + 1,
+                    init_params="stmc",
+                    params="stmc",
+                )
+                trial.fit(scaled)
+            else:
+                raise
         score = trial.score(scaled)
         if score > best_score:
             model = trial
             best_score = score
 
     # Label states post-hoc
-    state_labels = _label_states(model)
+    state_labels = _assign_regime_labels(model)
 
     result = {
         "model": model,
@@ -243,7 +272,7 @@ def train_regime_model(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Train a 3-state HMM on an index + VIX for market regime detection"
+        description="Train an N-state HMM on an index + VIX for market regime detection"
     )
     parser.add_argument(
         "--ticker", default="SPY", choices=list(TICKER_MAP.keys()),
@@ -258,8 +287,8 @@ def main() -> None:
         help="Years of historical data for training (default: 10)"
     )
     parser.add_argument(
-        "--states", type=int, default=3,
-        help="Number of hidden states (default: 3)"
+        "--states", type=int, default=6,
+        help="Number of hidden states (default: 6)"
     )
     args = parser.parse_args()
 
