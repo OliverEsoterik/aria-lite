@@ -63,7 +63,7 @@ Each model is a **6-state Gaussian HMM** trained on 10 years of daily data, usin
 Options:
 - `--ticker SPY | SOX | NDX` — which index to train on (default: SPY)
 - `--years 15` — use more/fewer years of training data
-- `--states 5` — use more/fewer states (default: 6)
+- `--states 4` — use more/fewer states (default: 6)
 - `--save-path data/my_params.pkl` — custom save path
 
 Re-run periodically (every 6–12 months) to keep the model current.
