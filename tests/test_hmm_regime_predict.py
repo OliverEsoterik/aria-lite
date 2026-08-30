@@ -114,8 +114,8 @@ def test_regime_forecast_returns_probabilities():
         assert abs(sum(probs) - 1.0) < 1e-3
 
 
-def test_regime_forecast_short_term():
-    """1-step forecast should match current_probs @ transmat."""
+def test_regime_forecast_returns_dict():
+    """Forecast should return a dict keyed by horizon."""
     np.random.seed(42)
     with tempfile.TemporaryDirectory() as tmpdir:
         params_path = Path(tmpdir) / "params.pkl"
@@ -126,9 +126,13 @@ def test_regime_forecast_short_term():
             recent_observations=recent,
         )
 
-    # Can't test exact numbers since _make_dummy_params uses random init
-    # Just verify structure is correct
+    # Exact values depend on random init; verify structure only
     assert isinstance(result["forecast"], dict)
+    for horizon, probs in result["forecast"].items():
+        assert isinstance(horizon, int)
+        # Probabilities should be a list of 6 floats
+        assert isinstance(probs, list)
+        assert len(probs) == 6
 
 
 def test_regime_forecast_long_term():

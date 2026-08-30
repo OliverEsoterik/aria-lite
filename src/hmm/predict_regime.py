@@ -335,7 +335,7 @@ def print_comparison_report(results: list[dict]) -> None:
     print(f"  HMM Regime Comparison  —  {datetime.now().strftime('%Y-%m-%d')}")
     print(f"{'=' * 60}")
     print()
-    print(f"  {'Index':<8} {'Regime':<12} {'Conf':<8} {'30d Fcast':<24} {'Persist':<8}")
+    print(f"  {'Index':<8} {'Regime':<18} {'Conf':<8} {'30d Fcast':<24} {'Persist':<8}")
     print(f"  {'─' * 8} {'─' * 12} {'─' * 8} {'─' * 24} {'─' * 8}")
 
     divergence = []
