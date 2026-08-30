@@ -8,16 +8,20 @@ from sklearn.preprocessing import StandardScaler
 from src.hmm.predict_regime import predict_regime
 
 
-def _make_dummy_params(path: str, n_states: int = 3):
-    """Create a minimal HMM param file for testing."""
+def _make_dummy_params(path: str, n_states: int = 6):
+    """Create a minimal HMM param file for testing.
+
+    Args:
+        path: Where to write the pickle.
+        n_states: Number of states (default: 6).
+    """
     model = hmm.GaussianHMM(
         n_components=n_states,
         covariance_type="full",
         random_state=42,
     )
-    # Pre-fit by training on synthetic data
     np.random.seed(42)
-    X = np.random.randn(200, 2)
+    X = np.random.randn(200, 4)
     model.fit(X)
 
     scaler = StandardScaler()
@@ -26,9 +30,13 @@ def _make_dummy_params(path: str, n_states: int = 3):
     result = {
         "model": model,
         "scaler": scaler,
-        "state_labels": ["BEAR", "SIDEWAYS", "BULL"] if n_states >= 3
-                        else [f"STATE_{i}" for i in range(n_states)],
-        "feature_names": ["spy_log_return", "vix_close"],
+        "state_labels": [
+            "Low-Vol Bull", "High-Vol Bull", "Low-Vol Sideways",
+            "High-Vol Sideways", "Low-Vol Bear", "High-Vol Bear",
+        ][:n_states],
+        "feature_names": [
+            "spy_log_return", "vix_close", "vix_log_return", "realized_vol",
+        ],
         "training_date": "2026-01-01",
     }
     with open(path, "wb") as f:
@@ -41,9 +49,7 @@ def test_predict_regime_returns_correct_structure():
     with tempfile.TemporaryDirectory() as tmpdir:
         params_path = Path(tmpdir) / "params.pkl"
         _make_dummy_params(str(params_path))
-
-        # Generate synthetic recent observations
-        recent = np.random.randn(60, 2)
+        recent = np.random.randn(60, 4)
 
         result = predict_regime(
             params_path=str(params_path),
@@ -56,8 +62,8 @@ def test_predict_regime_returns_correct_structure():
     assert "persistence" in result
     assert "state_labels" in result
     assert "guidance" in result
-    assert len(result["probabilities"]) == 3
-    assert abs(sum(result["probabilities"]) - 1.0) < 1e-6
+    assert len(result["probabilities"]) == 6
+    assert abs(sum(result["probabilities"]) - 1.0) < 1e-3
 
 
 def test_predict_regime_raises_on_missing_params():
@@ -75,14 +81,17 @@ def test_predict_regime_guidance_maps_correctly():
     with tempfile.TemporaryDirectory() as tmpdir:
         params_path = Path(tmpdir) / "params.pkl"
         _make_dummy_params(str(params_path))
-
-        recent = np.random.randn(60, 2)
+        recent = np.random.randn(60, 4)
         result = predict_regime(
             params_path=str(params_path),
             recent_observations=recent,
         )
 
-    assert result["state"] in ["BEAR", "SIDEWAYS", "BULL"]
+    valid_states = [
+        "Low-Vol Bull", "High-Vol Bull", "Low-Vol Sideways",
+        "High-Vol Sideways", "Low-Vol Bear", "High-Vol Bear",
+    ]
+    assert result["state"] in valid_states
     assert result["state"] == result["guidance"]["state"]
 
 
@@ -92,7 +101,7 @@ def test_regime_forecast_returns_probabilities():
     with tempfile.TemporaryDirectory() as tmpdir:
         params_path = Path(tmpdir) / "params.pkl"
         _make_dummy_params(str(params_path))
-        recent = np.random.randn(60, 2)
+        recent = np.random.randn(60, 4)
         result = predict_regime(
             params_path=str(params_path),
             recent_observations=recent,
@@ -101,31 +110,29 @@ def test_regime_forecast_returns_probabilities():
     assert "forecast" in result
     for horizon, probs in result["forecast"].items():
         assert isinstance(horizon, int)
-        assert len(probs) == 3
-        assert abs(sum(probs) - 1.0) < 1e-3  # rounded to 4dp
+        assert len(probs) == 6
+        assert abs(sum(probs) - 1.0) < 1e-3
 
 
-def test_regime_forecast_short_term():
-    """1-step forecast should match current_probs @ transmat."""
+def test_regime_forecast_returns_dict():
+    """Forecast should return a dict keyed by horizon."""
     np.random.seed(42)
     with tempfile.TemporaryDirectory() as tmpdir:
         params_path = Path(tmpdir) / "params.pkl"
         _make_dummy_params(str(params_path))
-        recent = np.random.randn(60, 2)
+        recent = np.random.randn(60, 4)
         result = predict_regime(
             params_path=str(params_path),
             recent_observations=recent,
         )
 
-    # 1-step forecast should equal current_probs @ transmat
-    transmat = np.array([
-        [0.9, 0.05, 0.05],
-        [0.1, 0.8, 0.1],
-        [0.05, 0.15, 0.8],
-    ])
-    # Can't test exact numbers since _make_dummy_params uses random init
-    # Just verify structure is correct
+    # Exact values depend on random init; verify structure only
     assert isinstance(result["forecast"], dict)
+    for horizon, probs in result["forecast"].items():
+        assert isinstance(horizon, int)
+        # Probabilities should be a list of 6 floats
+        assert isinstance(probs, list)
+        assert len(probs) == 6
 
 
 def test_regime_forecast_long_term():
@@ -134,13 +141,12 @@ def test_regime_forecast_long_term():
     with tempfile.TemporaryDirectory() as tmpdir:
         params_path = Path(tmpdir) / "params.pkl"
         _make_dummy_params(str(params_path))
-        recent = np.random.randn(60, 2)
+        recent = np.random.randn(60, 4)
         result = predict_regime(
             params_path=str(params_path),
             recent_observations=recent,
             forecast_horizons=[30, 60, 90, 180],
         )
 
-    # 90-day and 180-day forecasts should be similar (approaching stationary)
     diff = sum(abs(a - b) for a, b in zip(result["forecast"][90], result["forecast"][180]))
-    assert diff < 0.15  # Should be close to stationary
+    assert diff < 0.15

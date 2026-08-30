@@ -33,7 +33,7 @@ From there, all commands below assume you're inside the Nix shell.
 
 ## 1. Market Regime Detection
 
-Trains and predicts **Bull / Bear / Sideways** regimes for multiple indices. Currently supports three indices, each paired with VIX as the volatility proxy:
+Trains and predicts **Bull / Bear / Sideways** regimes (each with a low-vol and high-vol subtype) for multiple indices. Currently supports three indices, each paired with VIX as the volatility proxy:
 
 | Index | Ticker | Scope |
 |-------|--------|-------|
@@ -55,7 +55,7 @@ Or train a single index:
 make hmm-train-regime TICKER=SOX
 ```
 
-Each model is a 3-state Gaussian HMM trained on 10 years of daily data. Models are saved to:
+Each model is a **6-state Gaussian HMM** trained on 10 years of daily data, using features `[log_return, vix_close, vix_log_return, realized_vol]`. The six states capture directional bias (Bull, Sideways, Bear) crossed with volatility context (Low-Vol, High-Vol). Models are saved to:
 - `data/hmm_regime_params_spy.pkl`
 - `data/hmm_regime_params_sox.pkl`
 - `data/hmm_regime_params_ndx.pkl`
@@ -63,7 +63,7 @@ Each model is a 3-state Gaussian HMM trained on 10 years of daily data. Models a
 Options:
 - `--ticker SPY | SOX | NDX` — which index to train on (default: SPY)
 - `--years 15` — use more/fewer years of training data
-- `--states 4` — use more states (default: 3)
+- `--states 4` — use more/fewer states (default: 6)
 - `--save-path data/my_params.pkl` — custom save path
 
 Re-run periodically (every 6–12 months) to keep the model current.
@@ -82,11 +82,11 @@ Output:
   HMM Regime Comparison  —  2025-01-15
   ============================================================
 
-    Index   Regime        Conf    30d Fcast              Persist
-    ─────── ────────────  ─────   ─────────────────────  ────────
-    SPY     BULL          92%     BULL85% SIDEWAYS12%    97%
-    SOX     BULL          78%     BULL72% SIDEWAYS20%    89%
-    NDX     SIDEWAYS      55%     BULL52% SIDEWAYS40%    63%
+    Index   Regime              Conf    30d Fcast                        Persist
+    ─────── ──────────────────  ─────   ──────────────────────────────  ────────
+    SPY     Low-Vol BULL        92%     BULL89% SIDEWAYS9%  BEAR2%      97%
+    SOX     High-Vol BULL       78%     BULL68% SIDEWAYS24% BEAR8%      89%
+    NDX     Low-Vol SIDEWAYS    55%     BULL52% SIDEWAYS36% BEAR12%     63%
 
     ✓ SPY and SOX agree — BULL. Full conviction.
 
@@ -95,6 +95,8 @@ Output:
   ============================================================
   ...
 ```
+
+The comparison reports the **directional regime** (BULL / SIDEWAYS / BEAR) alongside the **volatility subtype** (Low-Vol / High-Vol), giving a richer picture of market conditions.
 
 The comparison table is followed by individual detailed reports for each index.
 
@@ -115,7 +117,22 @@ Options:
 - `--lookback 30` — use fewer/more recent days (default: 60)
 - `--params-path data/custom_params.pkl` — custom model path
 
-### 1.3 Divergence Heuristics
+### 1.3 Six Regime States
+
+The 6-state HMM models each directional regime with a low- and high-volatility variant:
+
+| State | Direction | Vol Context | Description |
+|-------|-----------|-------------|-------------|
+| **Low-Vol Bull** | Bull | Low VIX, low realized vol | Ideal for momentum — high returns in calm conditions |
+| **High-Vol Bull** | Bull | Elevated VIX, rising realized vol | Positive returns but reversion risk is higher |
+| **Low-Vol Sideways** | Sideways | Low VIX, low vol | Flat market, quiet — range trading or mean-reversion |
+| **High-Vol Sideways** | Sideways | Elevated VIX, high vol | Choppy, no direction — high vol in a range often precedes a breakout |
+| **Low-Vol Bear** | Bear | Moderate VIX, low realized vol | Downward drift without panic — defensive posture |
+| **High-Vol Bear** | Bear | High VIX, high realized vol | Panic / capitulation — cash is the winning position |
+
+The directional label used in outputs (BULL / SIDEWAYS / BEAR) is the **aggregate of both vol subtypes** for that direction. The subtype provides additional context for sizing and risk management.
+
+### 1.4 Divergence Heuristics
 
 The comparison report flags key divergences automatically:
 
@@ -127,14 +144,29 @@ The comparison report flags key divergences automatically:
 
 The most actionable signal is **SPY Bull + SOX Bear**: broad market is fine, but your sector is in its own down cycle.
 
-### 1.4 Regime Change Response (manual)
+### 1.5 Regime Change Response (manual)
+
+#### Directional transitions
 
 | Transition | Action |
 |---|---|
-| **BULL → BEAR** | Reduce position sizes, raise cash, tighten stops |
-| **BULL → SIDEWAYS** | Shorten hold periods, take profits faster |
-| **SIDEWAYS → BULL** | Increase deployment, widen stops, let winners run |
-| **BEAR → SIDEWAYS** | Start re-deploying cautiously, look for breakouts |
+| **BULL → BEAR** (any vol subtype) | Reduce position sizes, raise cash, tighten stops |
+| **BULL → SIDEWAYS** (any vol subtype) | Shorten hold periods, take profits faster |
+| **SIDEWAYS → BULL** (any vol subtype) | Increase deployment, widen stops, let winners run |
+| **BEAR → SIDEWAYS** (any vol subtype) | Start re-deploying cautiously, look for breakouts |
+
+#### Vol-subtype transitions (same direction)
+
+| Transition | Action |
+|---|---|
+| **Low-Vol Bull → High-Vol Bull** | Tighten stops, don't reduce exposure — trend intact but reversion risk rising |
+| **High-Vol Bull → Low-Vol Bull** | Widen stops, increase conviction — vol compression confirms the trend |
+| **Low-Vol Sideways → High-Vol Sideways** | Reduce further — range is becoming unstable, breakout likely |
+| **High-Vol Sideways → Low-Vol Sideways** | Cautiously start re-deploying — vol normalizing within the range |
+| **Low-Vol Bear → High-Vol Bear** | Raise cash to near-minimal — bear market accelerating |
+| **High-Vol Bear → Low-Vol Bear** | Start probing for reversal — panic subsiding, but stay defensive |
+
+**Key insight:** transitioning between vol subtypes within the same direction changes *sizing* and *stop placement*, not *direction exposure*. The direction change is the signal for asset allocation shifts.
 
 ---
 
