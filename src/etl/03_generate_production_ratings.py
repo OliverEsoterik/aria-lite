@@ -71,6 +71,7 @@ def get_extensive_fundamentals(ticker):
             'current_price': info.get('currentPrice', 0),
             'peg': round(peg, 3) if peg else 99.0,
             'fcf_yield': round(fcf_yield, 4), # Represented as decimal (0.05 = 5%)
+            'market_cap': mcap,
             'fwd_pe': fwd_pe,
             'trl_eps': trl_eps,
             'op_margin': info.get('operatingMargins', 0),
