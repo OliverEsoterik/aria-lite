@@ -3,6 +3,7 @@ import yfinance as yf
 from sqlalchemy import create_engine, text
 import numpy as np
 import argparse
+import math
 
 # --- Configuration ---
 import os
@@ -314,7 +315,6 @@ def compute_multibagger_score(row):
     #    A $1B company has more 10x room than a $500B one.
     mcap = row.get('market_cap', 0)
     if mcap and mcap > 0:
-        import math
         mcap_score = max(0, 1.0 - math.log10(mcap / 500e6) / 3.0)
     else:
         mcap_score = 0.0
