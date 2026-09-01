@@ -265,6 +265,64 @@ def assign_production_rating(row):
     return "HOLD"
 
 
+def compute_multibagger_score(row):
+    """Composite score ranking multi-bagger potential (3-10 year horizon).
+
+    Factors (informed by empirical multi-bagger research):
+      1. Revenue growth (30%) — the primary engine
+      2. Operating leverage (20%) — growth × margin confluence
+      3. ROE (15%) — capital efficiency / competitive moat
+      4. Execution confirmation (20%) — eps revisions + price acceleration
+      5. Valuation sanity (10%) — PEG near 1.0, penalized at extremes
+      6. Market cap opportunity (5%) — smaller caps have more room
+
+    Returns a raw composite. Caller rank-normalizes before display.
+    """
+    score = 0.0
+
+    # 1. Revenue growth (cap at 100% to limit outlier distortion)
+    rev = min(row.get('rev_growth', 0), 1.0)
+    score += max(rev, 0) * 0.30
+
+    # 2. Operating leverage: revenue × op_margin
+    #    A 50%-growing company with 20% margins scores higher than
+    #    50%-growing with 2% margins (value destruction).
+    om = max(row.get('op_margin', 0), 0)
+    score += (rev * min(om, 0.5) / 0.5) * 0.20
+
+    # 3. ROE (capital efficiency) — cap at 50% to tame micro-finance outliers
+    roe = max(min(row.get('roe', 0), 0.50), -0.20)
+    score += max(roe, 0) * 0.15
+
+    # 4. Execution confirmation: eps_rev + acceleration
+    er = max(row.get('eps_rev', 0), 0)
+    acc = max(row.get('acceleration', 0), 0)
+    execution = (er * 0.6 + acc * 0.4)
+    execution = min(execution, 0.50) / 0.50
+    score += max(execution, 0) * 0.20
+
+    # 5. Valuation sanity — inverted-U on PEG
+    #    Peak at PEG=1.0, decays to 0 at PEG=0 and PEG=5+
+    peg = row.get('peg', 99)
+    if 0 < peg < 5:
+        peg_score = max(0, 1.0 - abs(peg - 1.0) / 4.0)
+    else:
+        peg_score = 0.0
+    score += peg_score * 0.10
+
+    # 6. Market cap opportunity — log-linear, smaller = better
+    #    A $1B company has more 10x room than a $500B one.
+    mcap = row.get('market_cap', 0)
+    if mcap and mcap > 0:
+        import math
+        mcap_score = max(0, 1.0 - math.log10(mcap / 500e6) / 3.0)
+    else:
+        mcap_score = 0.0
+    score += mcap_score * 0.05
+
+    return score
+
+
 def deduplicate_by_company(df: pd.DataFrame, engine) -> pd.DataFrame:
     """
     For companies listed on multiple exchanges, keep only the highest-market-cap ticker.
