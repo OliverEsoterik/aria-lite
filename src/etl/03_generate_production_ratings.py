@@ -525,7 +525,7 @@ if __name__ == "__main__":
         pd.set_option('display.width', 1000)
         
         display_cols = [
-            'ticker', 'sector', 'rating', 'final_score', 'eps_rev', 'mom_score', 'peg', 'fwd_pe', 'rev_growth', 'op_margin', 'near_high', 'current_ratio', 'debt_to_equity', 'roe', 'profit_margin', 'fcf_yield'
+            'ticker', 'sector', 'rating', 'final_score', 'eps_rev', 'mom_score', 'peg', 'fwd_pe', 'rev_growth', 'op_margin', 'near_high', 'current_ratio', 'debt_to_equity', 'roe', 'profit_margin', 'fcf_yield', 'market_cap'
         ]
 
         print("\n" + "="*50)
