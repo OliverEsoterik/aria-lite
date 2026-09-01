@@ -778,6 +778,39 @@ if __name__ == "__main__":
             top_result = top_pool.sort_values('top_score', ascending=False).head(10)
             print(top_result[['ticker', 'sector', 'rating'] + top_cols].to_string(index=False))
 
+        # --- MULTI-BAGGER POTENTIAL (3-10 Year Horizon) ---
+        # Find stocks with the raw profile for exponential compounding.
+        # Filters: RiskGate pass, not SELL/HOLD, positive rev_growth.
+        mb_pool = picks[
+            picks['pass_gate']
+            & ~picks['rating'].str.startswith('SELL')
+            & ~picks['rating'].str.startswith('HOLD')
+            & (picks['rev_growth'].fillna(0) > 0)
+        ].copy()
+
+        mb_cols = [
+            'ticker', 'sector', 'mb_score', 'rev_growth', 'op_margin',
+            'roe', 'eps_rev', 'acceleration', 'peg', 'market_cap'
+        ]
+
+        print("\n" + "="*50)
+        print("--- MULTI-BAGGER POTENTIAL (Top 20 — 3-10 Year Horizon) ---")
+        print("="*50)
+        print("  Scored by: rev_growth 30% + op_leverage 20% + ROE 15%")
+        print("           + execution_conf 20% + valuation 10% + size_opp 5%")
+        print("  Filtered: RiskGate pass, not SELL/HOLD, positive rev_growth")
+        print()
+
+        if mb_pool.empty:
+            print("  (No stocks pass the multi-bagger filters this week)")
+        else:
+            mb_pool['mb_raw'] = mb_pool.apply(compute_multibagger_score, axis=1)
+            mb_pool['mb_score'] = rank_normalize(mb_pool['mb_raw'].fillna(0))
+            mb_pool['market_cap'] = mb_pool['market_cap'].fillna(0).astype(int)
+
+            top_mb = mb_pool.sort_values('mb_score', ascending=False).head(20)
+            print(top_mb[mb_cols].to_string(index=False))
+
         # --- PORTFOLIO INSIDER WATCH ---
         insider_pool = status[
             status['rating'].str.startswith('STRONG BUY') | status['rating'].str.startswith('BUY')
