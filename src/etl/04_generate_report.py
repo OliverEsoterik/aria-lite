@@ -23,6 +23,7 @@ _mod03 = __import__('03_generate_production_ratings')
 get_today_best_buys = _mod03.get_today_best_buys
 deduplicate_by_company = _mod03.deduplicate_by_company
 rank_normalize = _mod03.rank_normalize
+compute_multibagger_score = _mod03.compute_multibagger_score
 CURRENT_PORTFOLIO = _mod03.CURRENT_PORTFOLIO
 
 
@@ -271,6 +272,35 @@ def table_top_of_the_tops(picks: pd.DataFrame) -> str:
             + md_table(sorted_pool, ['ticker'] + cols, top_n=10))
 
 
+def table_multi_baggers(picks: pd.DataFrame) -> str:
+    """Multi-bagger potential — 3-10 year horizon.
+
+    Ranked by rev_growth x operating leverage x capital efficiency
+    x execution confirmation x valuation sanity x size opportunity.
+    """
+    pool = picks[
+        picks['pass_gate']
+        & ~picks['rating'].str.startswith('SELL')
+        & ~picks['rating'].str.startswith('HOLD')
+        & (picks['rev_growth'].fillna(0) > 0)
+    ].copy()
+
+    if pool.empty:
+        return ("\n### Multi-Bagger Potential\n\n"
+                + "  _(No stocks pass the filters this week)_\n\n")
+
+    pool['mb_raw'] = pool.apply(compute_multibagger_score, axis=1)
+    pool['mb_score'] = rank_normalize(pool['mb_raw'].fillna(0))
+
+    cols = ['mb_score', 'rev_growth', 'op_margin', 'roe', 'eps_rev', 'peg']
+    sorted_pool = pool.sort_values('mb_score', ascending=False)
+
+    return ("\n### Multi-Bagger Potential\n\n"
+            + "Stocks with the profile for exponential compounding "
+            + "(3-10 year horizon).\n\n"
+            + md_table(sorted_pool, ['ticker'] + cols, top_n=20))
+
+
 # ── Main ──
 
 def main() -> None:
@@ -313,11 +343,14 @@ def main() -> None:
     # Table 8 – Value & Momentum
     print(table_value_momentum(picks))
 
-    # Table 9 – Portfolio Highlights
+    # Table 9 – Multi-Bagger Potential
+    print(table_multi_baggers(picks))
+
+    # Table 10 – Portfolio Highlights
     if status is not None:
         print(table_portfolio_highlights(status))
 
-    # Table 10 – Top of the Tops
+    # Table 11 – Top of the Tops
     print(table_top_of_the_tops(picks))
 
 
