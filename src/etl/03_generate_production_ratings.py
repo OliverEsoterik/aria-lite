@@ -346,6 +346,12 @@ def deduplicate_by_company(df: pd.DataFrame, engine) -> pd.DataFrame:
 
     merged = df.merge(meta, on='ticker', how='left')
 
+    # The input df may already have a market_cap column (from yfinance), which
+    # causes pandas to suffix the merge columns as market_cap_x / market_cap_y.
+    # Use the dim_entities version (market_cap_y if suffixed, else market_cap)
+    # for dedup, then drop it and keep the yfinance version.
+    mcap_col = 'market_cap_y' if 'market_cap_y' in merged.columns else 'market_cap'
+
     # For rows with a known company_name, dedup by name keeping highest market_cap
     has_name = merged['company_name'].notna()
     no_name = merged[~has_name].copy()
@@ -355,11 +361,15 @@ def deduplicate_by_company(df: pd.DataFrame, engine) -> pd.DataFrame:
         has_name_df['_name_key'] = has_name_df['company_name'].str.strip().str.upper()
         # Use skipna=False so that a group where all market_cap are NaN
         # raises a clear error instead of silently failing.
-        idx = has_name_df.groupby('_name_key')['market_cap'].idxmax()
+        idx = has_name_df.groupby('_name_key')[mcap_col].idxmax()
         has_name_df = has_name_df.loc[idx].drop(columns=['_name_key'])
 
     result = pd.concat([no_name, has_name_df], ignore_index=True)
-    result = result.drop(columns=['company_name', 'market_cap'])
+    # Drop helper columns from dim_entities
+    result = result.drop(columns=['company_name', mcap_col], errors='ignore')
+    # If there was a suffix collision, keep the yfinance market_cap column
+    if 'market_cap_x' in result.columns:
+        result = result.rename(columns={'market_cap_x': 'market_cap'})
     return result
 
 
