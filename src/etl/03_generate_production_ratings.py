@@ -629,7 +629,9 @@ def screen_macd_setup(picks_df, engine):
       1. Weekly MACD_12_26_9 > 0  — 12-week EMA above 26-week EMA (medium-term trend up)
       2. Daily MACD_12_26_9 > 0   — 12-day EMA above 26-day EMA (short-term trend up)
 
-    Returns DataFrame with columns: ticker, close, weekly_macd, daily_macd, signal, rating.
+    Returns DataFrame with columns: ticker, close, signal, rating,
+    weekly_macd (fast-slow), weekly_hist (MACD - Signal),
+    daily_macd (fast-slow), daily_hist (MACD - Signal).
     """
     import pandas_ta as ta
 
@@ -660,9 +662,10 @@ def screen_macd_setup(picks_df, engine):
 
         # --- Daily MACD ---
         daily_macd_df = ta.macd(closes, fast=12, slow=26, signal=9, talib=False)
-        daily_macd_val = daily_macd_df.iloc[-1, 0]  # MACD_12_26_9 column
+        daily_macd_val = daily_macd_df.iloc[-1, 0]    # MACD_12_26_9  = fast EMA - slow EMA
+        daily_macdh_val = daily_macd_df.iloc[-1, 1]   # MACDh_12_26_9 = MACD - Signal (histogram)
 
-        if pd.isna(daily_macd_val):
+        if pd.isna(daily_macd_val) or pd.isna(daily_macdh_val):
             continue
 
         # --- Weekly MACD ---
@@ -679,19 +682,22 @@ def screen_macd_setup(picks_df, engine):
             continue
 
         weekly_macd_df = ta.macd(weekly_close, fast=12, slow=26, signal=9, talib=False)
-        weekly_macd_val = weekly_macd_df.iloc[-1, 0]
+        weekly_macd_val = weekly_macd_df.iloc[-1, 0]   # fast - slow
+        weekly_macdh_val = weekly_macd_df.iloc[-1, 1]  # histogram
 
-        if pd.isna(weekly_macd_val):
+        if pd.isna(weekly_macd_val) or pd.isna(weekly_macdh_val):
             continue
 
         if weekly_macd_val > 0 and daily_macd_val > 0:
             results.append({
                 'ticker': ticker,
                 'close': round(closes.iloc[-1], 2),
-                'weekly_macd': round(weekly_macd_val, 4),
-                'daily_macd': round(daily_macd_val, 4),
                 'signal': 'Both Positive',
                 'rating': rating_map.get(ticker, ''),
+                'weekly_macd': round(weekly_macd_val, 4),
+                'weekly_hist': round(weekly_macdh_val, 4),
+                'daily_macd': round(daily_macd_val, 4),
+                'daily_hist': round(daily_macdh_val, 4),
             })
 
     return pd.DataFrame(results)
@@ -1045,7 +1051,8 @@ if __name__ == "__main__":
         print("--- MACD CONFIRMATION (Weekly + Daily MACD Positive) ---")
         print("="*50)
         print("  Screened from New Alpha Discoveries")
-        print("  Criteria: weekly MACD_12_26_9 > 0 AND daily MACD_12_26_9 > 0")
+        print("  Columns: macd = fast EMA - slow EMA")
+        print("           hist = MACD - Signal (green/red bars on TradingView)")
         print()
 
         if macd_df.empty:
