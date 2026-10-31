@@ -664,19 +664,19 @@ def screen_macd_setup(picks_df, engine):
     if hist_df.empty:
         return pd.DataFrame()
 
+    score_map = picks_df.set_index('ticker')['final_score'].to_dict() if 'final_score' in picks_df.columns else {}
+
     results = []
     for ticker, group in hist_df.groupby('ticker'):
         group = group.sort_values('timestamp')
         closes = group['price_close']
 
-        if len(closes) < 34:  # need at least slow + signal - 1
+        if len(closes) < 34:
             continue
 
         # --- Daily MACD & Signal Crossover ---
-        # Bullish = MACD line is ABOVE the Signal line (MACD > Signal),
-        # meaning the histogram is green on TradingView.
         d = ta.macd(closes, fast=12, slow=26, signal=9, talib=False)
-        daily_active = d.iloc[:, 0] > d.iloc[:, 2]  # MACD_12_26_9 > MACDs_12_26_9
+        daily_active = d.iloc[:, 0] > d.iloc[:, 2]
 
         # --- Weekly MACD & Signal Crossover ---
         ts = pd.to_datetime(group['timestamp'], utc=True)
@@ -690,18 +690,18 @@ def screen_macd_setup(picks_df, engine):
         weekly_active = w.iloc[:, 0] > w.iloc[:, 2]
 
         # Map weekly state to daily index via forward-fill (no lookahead bias)
-        # Reindex weekly -> daily, avoid pandas FutureWarning by going through float
         weekly_active_daily = weekly_active.reindex(ts, method='ffill').astype(float).fillna(0.0).astype(bool)
 
-        # Both crossovers active simultaneously
-        both_active = daily_active.values & weekly_active_daily.values
+        # Determine status
+        daily_ok = bool(daily_active.iloc[-1])
+        weekly_ok = bool(weekly_active_daily.iloc[-1])
 
-        if both_active[-1]:
-            # Gather latest values for display
+        if weekly_ok:
+            status = 'Both Crossed' if daily_ok else 'Weekly Only'
             results.append({
                 'ticker': ticker,
-                'close': round(closes.iloc[-1], 2),
-                'signal_status': 'Both Crossed',
+                'signal_status': status,
+                'final_score': round(score_map.get(ticker, 0), 4),
                 'rating': rating_map.get(ticker, ''),
                 'weekly_macd': round(w.iloc[-1, 0], 4),
                 'weekly_signal': round(w.iloc[-1, 2], 4),
@@ -709,7 +709,10 @@ def screen_macd_setup(picks_df, engine):
                 'daily_signal': round(d.iloc[-1, 2], 4),
             })
 
-    return pd.DataFrame(results)
+    df = pd.DataFrame(results)
+    if not df.empty and 'final_score' in df.columns:
+        df = df.sort_values('final_score', ascending=False)
+    return df
 
 
 if __name__ == "__main__":
@@ -1053,18 +1056,31 @@ if __name__ == "__main__":
                 print(f"  Stop-Loss: below ${row['stop_loss']:.2f}")
                 print()
 
-        # --- MACD CONFIRMATION (Weekly + Daily MACD) ---
+        # --- MACD CROSSOVER ANALYSIS ---
         macd_df = screen_macd_setup(picks, engine)
 
-        print("\n" + "="*50)
-        print("--- MACD CONFIRMATION (Weekly + Daily MACD Positive) ---")
-        print("="*50)
-        print("  Screened from New Alpha Discoveries")
-        print("  Criteria: MACD crossed ABOVE Signal line on BOTH weekly and daily timeframes")
-        print("           (histogram green on TradingView = MACD > Signal, state persists after cross)")
-        print()
+        macd_cols = ['ticker', 'signal_status', 'final_score', 'rating',
+                     'weekly_macd', 'weekly_signal', 'daily_macd', 'daily_signal']
 
-        if macd_df.empty:
-            print("  (No stocks meet MACD confirmation criteria today)")
+        both = macd_df[macd_df['signal_status'] == 'Both Crossed'] if not macd_df.empty else macd_df
+        watch = macd_df[macd_df['signal_status'] == 'Weekly Only'] if not macd_df.empty else macd_df
+
+        print("\n" + "="*50)
+        print("--- MACD BOTH CROSSED (Weekly + Daily) ---")
+        print("="*50)
+        print("  MACD > Signal on BOTH timeframes — active buy signal")
+        print()
+        if both.empty:
+            print("  (No stocks meet both crossed criteria today)")
         else:
-            print(macd_df.to_string(index=False))
+            print(both[macd_cols].to_string(index=False))
+
+        print("\n" + "="*50)
+        print("--- MACD WEEKLY WATCHLIST (Daily Not Yet Crossed) ---")
+        print("="*50)
+        print("  Weekly MACD > Signal, daily still below — monitor for entry")
+        print()
+        if watch.empty:
+            print("  (No stocks on the weekly watchlist today)")
+        else:
+            print(watch[macd_cols].to_string(index=False))
