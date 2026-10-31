@@ -690,7 +690,7 @@ def screen_macd_setup(picks_df, engine):
         weekly_active = w.iloc[:, 0] > w.iloc[:, 2]
 
         # Map weekly state to daily index via forward-fill (no lookahead bias)
-        weekly_active_daily = weekly_active.reindex(ts, method='ffill').fillna(False)
+        weekly_active_daily = weekly_active.reindex(ts, method='ffill').fillna(False).astype(bool)
 
         # Both crossovers active simultaneously
         both_active = daily_active.values & weekly_active_daily.values
