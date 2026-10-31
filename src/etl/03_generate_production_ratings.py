@@ -84,7 +84,10 @@ def get_extensive_fundamentals(ticker):
             'eps_rev': eps_rev_val
         }
     except Exception:
-        return {'ticker': ticker, 'peg': 99.0, 'eps_rev': 0.0, 'current_price': 0, 'fcf_yield': 0.0}
+        return {'ticker': ticker, 'sector': 'N/A', 'peg': 99.0, 'eps_rev': 0.0,
+                'current_price': 0, 'fcf_yield': 0.0, 'market_cap': 0,
+                'fwd_pe': 999, 'trl_eps': 0, 'op_margin': 0, 'profit_margin': 0,
+                'rev_growth': 0, 'roe': 0, 'debt_to_equity': 0, 'current_ratio': 0}
 
 def yang_zhang_vol(df, period=None, min_periods=10, annualize=True):
     """
@@ -359,10 +362,14 @@ def deduplicate_by_company(df: pd.DataFrame, engine) -> pd.DataFrame:
 
     if not has_name_df.empty:
         has_name_df['_name_key'] = has_name_df['company_name'].str.strip().str.upper()
-        # Use skipna=False so that a group where all market_cap are NaN
-        # raises a clear error instead of silently failing.
+        # Use skipna=False so a group where all market_cap are NaN
+        # produces NaN entries — filter those out before indexing.
         idx = has_name_df.groupby('_name_key')[mcap_col].idxmax()
-        has_name_df = has_name_df.loc[idx].drop(columns=['_name_key'])
+        idx = idx.dropna()
+        if idx.empty:
+            has_name_df = pd.DataFrame()
+        else:
+            has_name_df = has_name_df.loc[idx].drop(columns=['_name_key'])
 
     result = pd.concat([no_name, has_name_df], ignore_index=True)
     # Drop helper columns from dim_entities
@@ -411,7 +418,7 @@ def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500, us_only=
         FROM statistics
         WHERE ticker IN (
             SELECT ticker FROM dim_entities
-            WHERE market_cap IS NOT NULL AND market_cap >= :min_market_cap
+            WHERE (market_cap IS NULL OR market_cap >= :min_market_cap)
         )
     """
     params = {"min_market_cap": min_market_cap}
@@ -518,6 +525,102 @@ def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500, us_only=
     portfolio_status = final_merged[final_merged['ticker'].isin(CURRENT_PORTFOLIO)].copy()
 
     return top_picks, portfolio_status
+
+
+def screen_pullback_setup(picks_df, engine):
+    """Screen the New Alpha Discoveries for an active pullback buy signal.
+
+    Three conditions (all must pass):
+      1. TREND: SMA 50 > SMA 200 AND close > SMA 50
+      2. PULLBACK: close is within [0.95 * SMA20, 1.01 * SMA20]
+         AND price was above SMA 20 sometime in the last 10 days
+      3. TRIGGER: close > SMA 20 AND (yesterday's close < SMA 20 OR latest candle is green)
+
+    Returns DataFrame of passing tickers with SMA values and stop-loss.
+    """
+    tickers = picks_df['ticker'].tolist()
+    if not tickers:
+        print("\n" + "="*50)
+        print("--- DAILY PULLBACK SETUP \u2014 ACTIVE BUY SIGNALS ---")
+        print("="*50)
+        print("  (No stocks in New Alpha Discoveries \u2014 nothing to screen)")
+        return pd.DataFrame()
+
+    query = text("""
+        SELECT ticker, price_open, price_high, price_low, price_close, timestamp
+        FROM market_prices
+        WHERE ticker IN :tickers AND timestamp >= NOW() - INTERVAL '400 days'
+        ORDER BY ticker, timestamp ASC
+    """)
+    hist_df = pd.read_sql(query, engine, params={'tickers': tuple(tickers)})
+
+    if hist_df.empty:
+        return pd.DataFrame()
+
+    results = []
+    for ticker, group in hist_df.groupby('ticker'):
+        group = group.sort_values('timestamp')
+        closes = group['price_close']
+
+        if len(closes) < 200:
+            continue  # insufficient data for SMA 200
+
+        sma_20 = closes.rolling(20).mean()
+        sma_50 = closes.rolling(50).mean()
+        sma_200 = closes.rolling(200).mean()
+
+        latest_close = closes.iloc[-1]
+        latest_sma_20 = sma_20.iloc[-1]
+        latest_sma_50 = sma_50.iloc[-1]
+        latest_sma_200 = sma_200.iloc[-1]
+        yesterday_close = closes.iloc[-2]
+        yesterday_sma_20 = sma_20.iloc[-2]
+
+        # Guard: all SMAs must be valid
+        if pd.isna(latest_sma_20) or pd.isna(latest_sma_50) or pd.isna(latest_sma_200):
+            continue
+
+        # Condition 1: TREND \u2014 SMA 50 > SMA 200 AND close > SMA 50
+        if not (latest_sma_50 > latest_sma_200 and latest_close > latest_sma_50):
+            continue
+
+        # Condition 2: PULLBACK \u2014 close within [0.95 * SMA20, 1.01 * SMA20]
+        if not (0.95 * latest_sma_20 <= latest_close <= 1.01 * latest_sma_20):
+            continue
+
+        # Also verify price was above SMA 20 sometime in the last 10 days
+        recent_mask = group['timestamp'] >= group['timestamp'].iloc[-1] - pd.Timedelta(days=10)
+        was_above = (closes[recent_mask] > sma_20[recent_mask]).any()
+        if not was_above:
+            continue
+
+        # Condition 3: TRIGGER \u2014 close > SMA 20 AND
+        #   (yesterday close < SMA 20 OR latest candle is green)
+        if not (latest_close > latest_sma_20):
+            continue
+        if not (yesterday_close < yesterday_sma_20 or group['price_close'].iloc[-1] > group['price_open'].iloc[-1]):
+            continue
+
+        # Stop-loss: min low of last 10 days; if within 1% of price, use SMA 50
+        recent_lows = group['price_low'].iloc[-10:]
+        stop_loss = recent_lows.min()
+        if stop_loss >= latest_close * 0.99:
+            stop_loss = latest_sma_50 * 0.98  # 2% below SMA 50
+
+        pct_above = ((latest_close / latest_sma_20) - 1) * 100
+
+        results.append({
+            'ticker': ticker,
+            'close': latest_close,
+            'sma_20': latest_sma_20,
+            'sma_50': latest_sma_50,
+            'sma_200': latest_sma_200,
+            'stop_loss': round(stop_loss, 2),
+            'pct_above_sma20': round(pct_above, 1),
+        })
+
+    return pd.DataFrame(results)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate production ratings")
@@ -838,3 +941,24 @@ if __name__ == "__main__":
             print("  (No held positions currently rated BUY or better)")
         else:
             print(insider_pool[insider_cols].to_string(index=False))
+
+        # --- DAILY PULLBACK SETUP (Technical Screen) ---
+        pullback_df = screen_pullback_setup(picks, engine)
+
+        print("\n" + "="*50)
+        print("--- DAILY PULLBACK SETUP \u2014 ACTIVE BUY SIGNALS ---")
+        print("="*50)
+        print("  Screened from New Alpha Discoveries")
+        print("  Criteria: Trend (SMA 50 > 200, price > SMA 50)")
+        print("          + Pullback (price at/near SMA 20)")
+        print("          + Trigger (break above SMA 20 or green bounce)")
+        print()
+
+        if pullback_df.empty:
+            print("  (No stocks meet pullback setup criteria today)")
+        else:
+            for _, row in pullback_df.iterrows():
+                print(f"\u2022 {row['ticker']}: SMA 50 > 200 confirmed, "
+                      f"price {row['pct_above_sma20']}% above SMA 20")
+                print(f"  Stop-Loss: below ${row['stop_loss']:.2f}")
+                print()
