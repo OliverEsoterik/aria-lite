@@ -707,9 +707,49 @@ def screen_macd_setup(picks_df, engine):
         # Map weekly state to daily index via forward-fill (no lookahead bias)
         weekly_active_daily = weekly_active.reindex(ts, method='ffill').astype(float).fillna(0.0).astype(bool)
 
-        # Determine status
+        # --- Monthly MACD & Signal Crossover ---
+        monthly_close = daily_by_ts.resample('M').last().dropna()
+        monthly_cross_age = None
+        m_macd_val = None
+        m_signal_val = None
+        monthly_ok = False
+
+        if len(monthly_close) >= 34:
+            m = ta.macd(monthly_close, fast=12, slow=26, signal=9, talib=False)
+            m_macd_val = round(m.iloc[-1, 0], 4)
+            m_signal_val = round(m.iloc[-1, 2], 4)
+            monthly_active = m.iloc[:, 0] > m.iloc[:, 2]
+            monthly_active_daily = monthly_active.reindex(ts, method='ffill').astype(float).fillna(0.0).astype(bool)
+            monthly_ok = bool(monthly_active_daily.iloc[-1])
+
+            # Cross age: trading days since the last monthly crossover
+            m_cross = monthly_active & (m.iloc[:, 0].shift(1) <= m.iloc[:, 2].shift(1))
+            m_cross_pos = np.where(m_cross.values)[0]
+            if len(m_cross_pos) > 0:
+                cross_month_end = monthly_close.index[m_cross_pos[-1]]
+                monthly_cross_age = int((ts >= cross_month_end).sum()) - 1
+                if monthly_cross_age < 0:
+                    monthly_cross_age = 0
+
+        # Determine daily/weekly status
         daily_ok = bool(daily_active.iloc[-1])
         weekly_ok = bool(weekly_active_daily.iloc[-1])
+
+        base_row = {
+            'ticker': ticker,
+            'final_score': round(score_map.get(ticker, 0), 4),
+            'rating': rating_map.get(ticker, ''),
+            'daily_gap': None,
+            'gap_trend': None,
+            'cross_age': None,
+            'weekly_macd': None,
+            'weekly_signal': None,
+            'daily_macd': None,
+            'daily_signal': None,
+            'monthly_macd': m_macd_val,
+            'monthly_signal': m_signal_val,
+            'monthly_cross_age': monthly_cross_age,
+        }
 
         if daily_ok or weekly_ok:
             if daily_ok and weekly_ok:
@@ -718,11 +758,9 @@ def screen_macd_setup(picks_df, engine):
                 status = 'Daily First'
             else:
                 status = 'Weekly Only'
-            results.append({
-                'ticker': ticker,
+            row = base_row.copy()
+            row.update({
                 'signal_status': status,
-                'final_score': round(score_map.get(ticker, 0), 4),
-                'rating': rating_map.get(ticker, ''),
                 'daily_gap': round(daily_gap, 4),
                 'gap_trend': gap_trend,
                 'cross_age': cross_age,
@@ -731,18 +769,31 @@ def screen_macd_setup(picks_df, engine):
                 'daily_macd': round(d.iloc[-1, 0], 4),
                 'daily_signal': round(d.iloc[-1, 2], 4),
             })
+            results.append(row)
+
+        # Emit monthly row if monthly crossed (independent of daily/weekly)
+        if monthly_ok:
+            row = base_row.copy()
+            row.update({
+                'signal_status': 'Monthly Crossed',
+                'cross_age': monthly_cross_age,
+            })
+            results.append(row)
 
     df = pd.DataFrame(results)
     if not df.empty:
         both_idx = df['signal_status'] == 'Both Crossed'
         daily_idx = df['signal_status'] == 'Daily First'
         watch_idx = df['signal_status'] == 'Weekly Only'
+        month_idx = df['signal_status'] == 'Monthly Crossed'
         both_sorted = df[both_idx].sort_values('final_score', ascending=False)
         daily_sorted = df[daily_idx].sort_values(['cross_age', 'final_score'],
                                                   ascending=[True, False])
+        month_sorted = df[month_idx].sort_values(['cross_age', 'final_score'],
+                                                  ascending=[True, False])
         watch_sorted = df[watch_idx].sort_values(['daily_gap', 'final_score'],
                                                   ascending=[True, False])
-        df = pd.concat([both_sorted, daily_sorted, watch_sorted], ignore_index=True)
+        df = pd.concat([both_sorted, daily_sorted, month_sorted, watch_sorted], ignore_index=True)
     return df
 
 
