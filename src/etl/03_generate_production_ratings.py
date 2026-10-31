@@ -652,19 +652,18 @@ def screen_macd_setup(picks_df, engine):
         return pd.DataFrame()
 
     rating_map = picks_df.set_index('ticker')['rating'].to_dict() if 'rating' in picks_df.columns else {}
+    score_map = picks_df.set_index('ticker')['final_score'].to_dict() if 'final_score' in picks_df.columns else {}
 
     query = text("""
         SELECT ticker, price_open, price_high, price_low, price_close, timestamp
         FROM market_prices
-        WHERE ticker IN :tickers AND timestamp >= NOW() - INTERVAL '400 days'
+        WHERE ticker IN :tickers AND timestamp >= NOW() - INTERVAL '5 years'
         ORDER BY ticker, timestamp ASC
     """)
     hist_df = pd.read_sql(query, engine, params={'tickers': tuple(tickers)})
 
     if hist_df.empty:
         return pd.DataFrame()
-
-    score_map = picks_df.set_index('ticker')['final_score'].to_dict() if 'final_score' in picks_df.columns else {}
 
     results = []
     for ticker, group in hist_df.groupby('ticker'):
@@ -1093,12 +1092,15 @@ if __name__ == "__main__":
 
         both = macd_df[macd_df['signal_status'] == 'Both Crossed'] if not macd_df.empty else macd_df
         first = macd_df[macd_df['signal_status'] == 'Daily First'] if not macd_df.empty else macd_df
+        month = macd_df[macd_df['signal_status'] == 'Monthly Crossed'] if not macd_df.empty else macd_df
         watch = macd_df[macd_df['signal_status'] == 'Weekly Only'] if not macd_df.empty else macd_df
 
         both_cols = ['ticker', 'cross_age', 'final_score', 'rating',
                      'daily_macd', 'daily_signal', 'weekly_macd', 'weekly_signal']
         first_cols = ['ticker', 'cross_age', 'final_score', 'rating',
                       'daily_macd', 'daily_signal', 'weekly_macd', 'weekly_signal']
+        month_cols = ['ticker', 'cross_age', 'final_score', 'rating',
+                      'monthly_macd', 'monthly_signal']
         watch_cols = ['ticker', 'daily_gap', 'gap_trend', 'final_score', 'rating',
                       'daily_macd', 'daily_signal', 'weekly_macd']
 
@@ -1133,6 +1135,19 @@ if __name__ == "__main__":
             dsp = first.copy()
             dsp['cross_age'] = fmt_cross_age(dsp['cross_age'])
             print(dsp[first_cols].to_string(index=False))
+
+        print("\n" + "="*50)
+        print("--- MACD MONTHLY CROSSED (12-Month EMA > 26-Month EMA) ---")
+        print("="*50)
+        print("  Monthly MACD > Signal \u2014 long-term regime shift confirmed")
+        print("  Sorted by: cross_age (freshest first), then final_score")
+        print()
+        if month.empty:
+            print("  (No stocks with monthly crossover today)")
+        else:
+            dsp = month.copy()
+            dsp['cross_age'] = fmt_cross_age(dsp['cross_age'])
+            print(dsp[month_cols].to_string(index=False))
 
         print("\n" + "="*50)
         print("--- MACD WEEKLY WATCHLIST (Weekly Crossed, Daily Not Yet) ---")
