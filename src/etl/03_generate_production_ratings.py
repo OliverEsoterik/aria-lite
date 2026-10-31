@@ -622,6 +622,76 @@ def screen_pullback_setup(picks_df, engine):
     return pd.DataFrame(results)
 
 
+def screen_macd_setup(picks_df, engine):
+    """Screen the New Alpha Discoveries for stocks with positive MACD on weekly and daily timeframes.
+
+    Conditions (both must pass):
+      1. Weekly MACD_12_26_9 > 0  — 12-week EMA above 26-week EMA (medium-term trend up)
+      2. Daily MACD_12_26_9 > 0   — 12-day EMA above 26-day EMA (short-term trend up)
+
+    Returns DataFrame with columns: ticker, close, weekly_macd, daily_macd, signal, rating.
+    """
+    import pandas_ta as ta
+
+    tickers = picks_df['ticker'].tolist()
+    if not tickers:
+        return pd.DataFrame()
+
+    rating_map = picks_df.set_index('ticker')['rating'].to_dict() if 'rating' in picks_df.columns else {}
+
+    query = text("""
+        SELECT ticker, price_open, price_high, price_low, price_close, timestamp
+        FROM market_prices
+        WHERE ticker IN :tickers AND timestamp >= NOW() - INTERVAL '400 days'
+        ORDER BY ticker, timestamp ASC
+    """)
+    hist_df = pd.read_sql(query, engine, params={'tickers': tuple(tickers)})
+
+    if hist_df.empty:
+        return pd.DataFrame()
+
+    results = []
+    for ticker, group in hist_df.groupby('ticker'):
+        group = group.sort_values('timestamp')
+        closes = group['price_close']
+
+        if len(closes) < 26:
+            continue  # not enough data for even daily MACD
+
+        # --- Daily MACD ---
+        daily_macd_df = ta.macd(closes, fast=12, slow=26, signal=9, talib=False)
+        daily_macd_val = daily_macd_df.iloc[-1, 0]  # MACD_12_26_9 column
+
+        if pd.isna(daily_macd_val):
+            continue
+
+        # --- Weekly MACD ---
+        # Resample daily data to weekly (week ending Friday), take last close
+        weekly = group.set_index('timestamp')['price_close']
+        weekly_close = weekly.resample('W-FRI').last().dropna()
+
+        if len(weekly_close) < 26:
+            continue
+
+        weekly_macd_df = ta.macd(weekly_close, fast=12, slow=26, signal=9, talib=False)
+        weekly_macd_val = weekly_macd_df.iloc[-1, 0]
+
+        if pd.isna(weekly_macd_val):
+            continue
+
+        if weekly_macd_val > 0 and daily_macd_val > 0:
+            results.append({
+                'ticker': ticker,
+                'close': round(closes.iloc[-1], 2),
+                'weekly_macd': round(weekly_macd_val, 4),
+                'daily_macd': round(daily_macd_val, 4),
+                'signal': 'Both Positive',
+                'rating': rating_map.get(ticker, ''),
+            })
+
+    return pd.DataFrame(results)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate production ratings")
     parser.add_argument("--us", action="store_true", help="Only rate US tickers (no dot suffix)")
