@@ -4,24 +4,12 @@ from sqlalchemy import create_engine, text
 import numpy as np
 import argparse
 import math
-import requests
 
 # --- Configuration ---
 import os
 DB_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg2:///alphapicks")
 engine = create_engine(DB_URL, pool_size=10, max_overflow=20)
 CURRENT_PORTFOLIO = ['MU', 'GOOG', 'CLS', 'GOOGL', 'AGX', 'LQDA', 'VICR', 'SIMO', 'AAMI', 'DELL', 'TER', 'STRL', 'AGX', 'CRDO', 'CIEN', 'LITE', 'CRDO', 'AMKR', 'KALU', 'BE', 'CLSK', 'IREN', 'SNDK', 'TE', 'TSM', 'ESLT', 'LRCX', 'APH', 'AVGO', 'CRDO', 'CIEN', 'AMD', 'CLS', 'STX', 'WDC', 'FSLR', 'DELL', 'MRVL', 'NU', 'TSM', 'NVDA']
-
-# Shared requests session with a realistic browser User-Agent so Yahoo
-# is less likely to flag the yfinance calls as automated.
-_YF_SESSION = requests.Session()
-_YF_SESSION.headers.update({
-    'User-Agent': ('Mozilla/5.0 (X11; Linux x86_64) '
-                   'AppleWebKit/537.36 (KHTML, like Gecko) '
-                   'Chrome/131.0.0.0 Safari/537.36'),
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
-})
 
 # --- 1. The Risk Gate (Toxic Waste Filter) ---
 class RiskGate:
@@ -45,7 +33,7 @@ class RiskGate:
 # --- 2. Data Fetching & Momentum Logic ---
 def get_extensive_fundamentals(ticker):
     try:
-        stock = yf.Ticker(ticker, session=_YF_SESSION)
+        stock = yf.Ticker(ticker)
         info = stock.info
         fwd_pe = info.get('forwardPE', 0)
         peg = info.get('pegRatio') 
@@ -468,13 +456,13 @@ def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500, us_only=
     print(f"Executing deep research on {len(research_pool)} candidates in batches...")
     tickers_to_research = research_pool['ticker'].tolist()
     all_fund_data = []
-    BATCH_SIZE = 25
-
+    BATCH_SIZE = 50 
+    
     for i in range(0, len(tickers_to_research), BATCH_SIZE):
         batch = tickers_to_research[i:i + BATCH_SIZE]
         print(f"Batch {i//BATCH_SIZE + 1}: Fetching {len(batch)} tickers...")
-
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        
+        with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_ticker = {executor.submit(get_extensive_fundamentals, t): t for t in batch}
             for future in as_completed(future_to_ticker):
                 try:
@@ -484,7 +472,7 @@ def get_today_best_buys(engine, initial_pool_size=800, final_top_n=500, us_only=
                 except Exception as e:
                     print(f"API Error for {future_to_ticker[future]}: {e}")
         
-        time.sleep(1.5 + np.random.uniform(0.0, 1.5))  # jittered 1.5–3.0s
+        time.sleep(1.5) # Anti-throttling jittered delay
 
     fund_df = pd.DataFrame(all_fund_data)
     
