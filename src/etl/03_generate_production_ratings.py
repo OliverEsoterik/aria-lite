@@ -667,8 +667,10 @@ def screen_macd_setup(picks_df, engine):
 
         # --- Weekly MACD ---
         # Resample daily data to weekly (week ending Friday), take last close
-        weekly = group.set_index('timestamp')['price_close']
-        weekly_close = weekly.resample('W-FRI').last().dropna()
+        group_idx = group.set_index('timestamp')
+        if not isinstance(group_idx.index, pd.DatetimeIndex):
+            group_idx.index = pd.DatetimeIndex(group_idx.index)
+        weekly_close = group_idx['price_close'].resample('W-FRI').last().dropna()
 
         if len(weekly_close) < 26:
             continue
