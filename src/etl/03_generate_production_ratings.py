@@ -623,13 +623,27 @@ def screen_pullback_setup(picks_df, engine):
 
 
 def screen_macd_setup(picks_df, engine):
-    """Screen the New Alpha Discoveries for stocks with positive MACD on weekly and daily timeframes.
+    """Screen New Alpha Discoveries for stocks with a bullish MACD crossover on
+    both daily and weekly timeframes.
 
-    Conditions (both must pass):
-      1. Weekly MACD_12_26_9 > 0  — 12-week EMA above 26-week EMA (weekly resample)
-      2. Daily MACD_12_26_9 > 0   — 12-day EMA above 26-day EMA (last 90 trading days)
+    A bullish crossover occurs when the MACD line (fast EMA - slow EMA) crosses
+    ABOVE the Signal line (EMA of MACD).  This is equivalent to the histogram
+    turning green on TradingView.
 
-    Returns DataFrame with columns: ticker, close, signal, rating, weekly_macd, daily_macd.
+    Conditions (both must be active simultaneously):
+      1. Daily crossover: MACD > Signal today AND MACD <= Signal yesterday
+      2. Weekly crossover: MACD > Signal this week AND MACD <= Signal last week
+         (mapped to daily index via forward-fill)
+
+    Returns DataFrame with columns: ticker, close, rating, signal_status,
+    weekly_macd, weekly_signal, daily_macd, daily_signal.
+
+    References
+    ----------
+    A bullish crossover = MACD line crosses ABOVE the Signal line
+    (MACD > Signal).  The crossover state persists after the event until a
+    reverse cross.  Weekly state is forward-filled to the daily index to
+    prevent lookahead bias.
     """
     import pandas_ta as ta
 
@@ -655,45 +669,43 @@ def screen_macd_setup(picks_df, engine):
         group = group.sort_values('timestamp')
         closes = group['price_close']
 
-        if len(closes) < 26:
-            continue  # not enough data for even daily MACD
-
-        # --- Daily MACD (last 90 trading days, matching TradingView daily view) ---
-        daily_closes = closes.iloc[-90:]
-        daily_macd_df = ta.macd(daily_closes, fast=12, slow=26, signal=9, talib=False)
-        daily_macd_val = daily_macd_df.iloc[-1, 0]
-
-        if pd.isna(daily_macd_val):
+        if len(closes) < 34:  # need at least slow + signal - 1
             continue
 
-        # --- Weekly MACD ---
-        # Resample daily data to weekly (week ending Friday), take last close
+        # --- Daily MACD & Signal Crossover ---
+        # Bullish = MACD line is ABOVE the Signal line (MACD > Signal),
+        # meaning the histogram is green on TradingView.
+        d = ta.macd(closes, fast=12, slow=26, signal=9, talib=False)
+        daily_active = d.iloc[:, 0] > d.iloc[:, 2]  # MACD_12_26_9 > MACDs_12_26_9
+
+        # --- Weekly MACD & Signal Crossover ---
         ts = pd.to_datetime(group['timestamp'], utc=True)
-        weekly_close = (
-            group.set_index(ts)['price_close']
-            .resample('W-FRI')
-            .last()
-            .dropna()
-        )
+        daily_by_ts = pd.Series(closes.values, index=ts)
+        weekly_close = daily_by_ts.resample('W-FRI').last().dropna()
 
-        if len(weekly_close) < 26:
+        if len(weekly_close) < 34:
             continue
 
-        weekly_macd_df = ta.macd(weekly_close, fast=12, slow=26, signal=9, talib=False)
-        weekly_macd_val = weekly_macd_df.iloc[-1, 0]   # fast - slow
-        weekly_macdh_val = weekly_macd_df.iloc[-1, 1]  # histogram
+        w = ta.macd(weekly_close, fast=12, slow=26, signal=9, talib=False)
+        weekly_active = w.iloc[:, 0] > w.iloc[:, 2]
 
-        if pd.isna(weekly_macd_val) or pd.isna(weekly_macdh_val):
-            continue
+        # Map weekly state to daily index via forward-fill (no lookahead bias)
+        weekly_active_daily = weekly_active.reindex(ts, method='ffill').fillna(False)
 
-        if weekly_macd_val > 0 and daily_macd_val > 0:
+        # Both crossovers active simultaneously
+        both_active = daily_active.values & weekly_active_daily.values
+
+        if both_active[-1]:
+            # Gather latest values for display
             results.append({
                 'ticker': ticker,
                 'close': round(closes.iloc[-1], 2),
-                'signal': 'Both Positive',
+                'signal_status': 'Both Crossed',
                 'rating': rating_map.get(ticker, ''),
-                'weekly_macd': round(weekly_macd_val, 4),
-                'daily_macd': round(daily_macd_val, 4),
+                'weekly_macd': round(w.iloc[-1, 0], 4),
+                'weekly_signal': round(w.iloc[-1, 2], 4),
+                'daily_macd': round(d.iloc[-1, 0], 4),
+                'daily_signal': round(d.iloc[-1, 2], 4),
             })
 
     return pd.DataFrame(results)
@@ -1047,7 +1059,8 @@ if __name__ == "__main__":
         print("--- MACD CONFIRMATION (Weekly + Daily MACD Positive) ---")
         print("="*50)
         print("  Screened from New Alpha Discoveries")
-        print("  Criteria: weekly MACD_12_26_9 > 0 (weekly resample) AND daily MACD_12_26_9 > 0 (last 90 days)")
+        print("  Criteria: MACD crossed ABOVE Signal line on BOTH weekly and daily timeframes")
+        print("           (histogram green on TradingView = MACD > Signal, state persists after cross)")
         print()
 
         if macd_df.empty:
