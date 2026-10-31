@@ -625,11 +625,9 @@ def screen_pullback_setup(picks_df, engine):
 def screen_macd_setup(picks_df, engine):
     """Screen the New Alpha Discoveries for stocks with positive MACD on weekly and daily timeframes.
 
-    Conditions (all four must pass):
-      1. Weekly MACD_12_26_9 > 0  — 12-week EMA above 26-week EMA
-      2. Weekly MACDh_12_26_9 > 0 — weekly histogram green (MACD > Signal)
-      3. Daily MACD_12_26_9 > 0   — 12-day EMA above 26-day EMA
-      4. Daily MACDh_12_26_9 > 0  — daily histogram green (MACD > Signal)
+    Conditions (both must pass):
+      1. Weekly MACD_12_26_9 > 0  — 12-week EMA above 26-week EMA (weekly resample)
+      2. Daily MACD_12_26_9 > 0   — 12-day EMA above 26-day EMA (last 90 trading days)
 
     Returns DataFrame with columns: ticker, close, signal, rating,
     weekly_macd (fast-slow), weekly_hist (MACD - Signal),
@@ -662,12 +660,12 @@ def screen_macd_setup(picks_df, engine):
         if len(closes) < 26:
             continue  # not enough data for even daily MACD
 
-        # --- Daily MACD ---
-        daily_macd_df = ta.macd(closes, fast=12, slow=26, signal=9, talib=False)
-        daily_macd_val = daily_macd_df.iloc[-1, 0]    # MACD_12_26_9  = fast EMA - slow EMA
-        daily_macdh_val = daily_macd_df.iloc[-1, 1]   # MACDh_12_26_9 = MACD - Signal (histogram)
+        # --- Daily MACD (last 90 trading days, matching TradingView daily view) ---
+        daily_closes = closes.iloc[-90:]
+        daily_macd_df = ta.macd(daily_closes, fast=12, slow=26, signal=9, talib=False)
+        daily_macd_val = daily_macd_df.iloc[-1, 0]
 
-        if pd.isna(daily_macd_val) or pd.isna(daily_macdh_val):
+        if pd.isna(daily_macd_val):
             continue
 
         # --- Weekly MACD ---
@@ -690,7 +688,7 @@ def screen_macd_setup(picks_df, engine):
         if pd.isna(weekly_macd_val) or pd.isna(weekly_macdh_val):
             continue
 
-        if weekly_macd_val > 0 and weekly_macdh_val > 0 and daily_macd_val > 0 and daily_macdh_val > 0:
+        if weekly_macd_val > 0 and daily_macd_val > 0:
             results.append({
                 'ticker': ticker,
                 'close': round(closes.iloc[-1], 2),
@@ -1053,9 +1051,7 @@ if __name__ == "__main__":
         print("--- MACD CONFIRMATION (Weekly + Daily MACD Positive) ---")
         print("="*50)
         print("  Screened from New Alpha Discoveries")
-        print("  Conditions: MACD > 0 (fast EMA > slow EMA) AND hist > 0 (histogram green)")
-        print("  Columns:   macd = fast EMA - slow EMA")
-        print("             hist = MACD - Signal (green/red bars on TradingView)")
+        print("  Criteria: weekly MACD_12_26_9 > 0 (weekly resample) AND daily MACD_12_26_9 > 0 (last 90 days)")
         print()
 
         if macd_df.empty:
