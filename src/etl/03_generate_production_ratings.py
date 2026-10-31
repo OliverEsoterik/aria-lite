@@ -629,9 +629,7 @@ def screen_macd_setup(picks_df, engine):
       1. Weekly MACD_12_26_9 > 0  — 12-week EMA above 26-week EMA (weekly resample)
       2. Daily MACD_12_26_9 > 0   — 12-day EMA above 26-day EMA (last 90 trading days)
 
-    Returns DataFrame with columns: ticker, close, signal, rating,
-    weekly_macd (fast-slow), weekly_hist (MACD - Signal),
-    daily_macd (fast-slow), daily_hist (MACD - Signal).
+    Returns DataFrame with columns: ticker, close, signal, rating, weekly_macd, daily_macd.
     """
     import pandas_ta as ta
 
@@ -695,9 +693,7 @@ def screen_macd_setup(picks_df, engine):
                 'signal': 'Both Positive',
                 'rating': rating_map.get(ticker, ''),
                 'weekly_macd': round(weekly_macd_val, 4),
-                'weekly_hist': round(weekly_macdh_val, 4),
                 'daily_macd': round(daily_macd_val, 4),
-                'daily_hist': round(daily_macdh_val, 4),
             })
 
     return pd.DataFrame(results)
