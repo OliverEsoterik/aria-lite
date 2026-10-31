@@ -712,8 +712,13 @@ def screen_macd_setup(picks_df, engine):
         daily_ok = bool(daily_active.iloc[-1])
         weekly_ok = bool(weekly_active_daily.iloc[-1])
 
-        if weekly_ok:
-            status = 'Both Crossed' if daily_ok else 'Weekly Only'
+        if daily_ok or weekly_ok:
+            if daily_ok and weekly_ok:
+                status = 'Both Crossed'
+            elif daily_ok and not weekly_ok:
+                status = 'Daily First'
+            else:
+                status = 'Weekly Only'
             results.append({
                 'ticker': ticker,
                 'signal_status': status,
@@ -721,7 +726,7 @@ def screen_macd_setup(picks_df, engine):
                 'rating': rating_map.get(ticker, ''),
                 'daily_gap': round(daily_gap, 4),
                 'gap_trend': gap_trend,
-                'cross_age': cross_age if daily_ok else None,
+                'cross_age': cross_age,
                 'weekly_macd': round(w.iloc[-1, 0], 4),
                 'weekly_signal': round(w.iloc[-1, 2], 4),
                 'daily_macd': round(d.iloc[-1, 0], 4),
@@ -731,11 +736,14 @@ def screen_macd_setup(picks_df, engine):
     df = pd.DataFrame(results)
     if not df.empty:
         both_idx = df['signal_status'] == 'Both Crossed'
+        daily_idx = df['signal_status'] == 'Daily First'
         watch_idx = df['signal_status'] == 'Weekly Only'
         both_sorted = df[both_idx].sort_values('final_score', ascending=False)
+        daily_sorted = df[daily_idx].sort_values(['cross_age', 'final_score'],
+                                                  ascending=[True, False])
         watch_sorted = df[watch_idx].sort_values(['daily_gap', 'final_score'],
-                                                   ascending=[True, False])
-        df = pd.concat([both_sorted, watch_sorted], ignore_index=True)
+                                                  ascending=[True, False])
+        df = pd.concat([both_sorted, daily_sorted, watch_sorted], ignore_index=True)
     return df
 
 
@@ -1084,12 +1092,22 @@ if __name__ == "__main__":
         macd_df = screen_macd_setup(picks, engine)
 
         both = macd_df[macd_df['signal_status'] == 'Both Crossed'] if not macd_df.empty else macd_df
+        first = macd_df[macd_df['signal_status'] == 'Daily First'] if not macd_df.empty else macd_df
         watch = macd_df[macd_df['signal_status'] == 'Weekly Only'] if not macd_df.empty else macd_df
 
         both_cols = ['ticker', 'cross_age', 'final_score', 'rating',
                      'daily_macd', 'daily_signal', 'weekly_macd', 'weekly_signal']
+        first_cols = ['ticker', 'cross_age', 'final_score', 'rating',
+                      'daily_macd', 'daily_signal', 'weekly_macd', 'weekly_signal']
         watch_cols = ['ticker', 'daily_gap', 'gap_trend', 'final_score', 'rating',
                       'daily_macd', 'daily_signal', 'weekly_macd']
+
+        def fmt_cross_age(col):
+            return col.apply(
+                lambda x: f"\u2605 {x}d" if x is not None and x <= 5
+                          else f"{x}d" if x is not None
+                          else '\u2014'
+            )
 
         print("\n" + "="*50)
         print("--- MACD BOTH CROSSED (Weekly + Daily) ---")
@@ -1099,17 +1117,28 @@ if __name__ == "__main__":
         if both.empty:
             print("  (No stocks meet both crossed criteria today)")
         else:
-            display = both.copy()
-            display['cross_age'] = display['cross_age'].apply(
-                lambda x: f"\u2605 {x}d" if x is not None and x <= 5 else f"{x}d" if x is not None else '\u2014'
-            )
-            print(display[both_cols].to_string(index=False))
+            dsp = both.copy()
+            dsp['cross_age'] = fmt_cross_age(dsp['cross_age'])
+            print(dsp[both_cols].to_string(index=False))
 
         print("\n" + "="*50)
-        print("--- MACD WEEKLY WATCHLIST (Daily Not Yet Crossed) ---")
+        print("--- MACD DAILY FIRST (Daily Crossed, Weekly Not Yet) ---")
+        print("="*50)
+        print("  Daily MACD > Signal, weekly still below \u2014 sharp recent move")
+        print("  Sorted by: cross_age (freshest first), then final_score")
+        print()
+        if first.empty:
+            print("  (No stocks with daily-only crossover today)")
+        else:
+            dsp = first.copy()
+            dsp['cross_age'] = fmt_cross_age(dsp['cross_age'])
+            print(dsp[first_cols].to_string(index=False))
+
+        print("\n" + "="*50)
+        print("--- MACD WEEKLY WATCHLIST (Weekly Crossed, Daily Not Yet) ---")
         print("="*50)
         print("  Weekly MACD > Signal, daily still below \u2014 monitor for entry")
-        print("  gap_trend: \U0001f4c8 = narrowing (moving toward cross), \U0001f4c9 = widening")
+        print("  gap_trend: \U0001f4c8 = narrowing, \U0001f4c9 = widening")
         print("  Sorted by: daily_gap closest to zero first")
         print()
         if watch.empty:
