@@ -1032,3 +1032,18 @@ if __name__ == "__main__":
                       f"price {row['pct_above_sma20']}% above SMA 20")
                 print(f"  Stop-Loss: below ${row['stop_loss']:.2f}")
                 print()
+
+        # --- MACD CONFIRMATION (Weekly + Daily MACD) ---
+        macd_df = screen_macd_setup(picks, engine)
+
+        print("\n" + "="*50)
+        print("--- MACD CONFIRMATION (Weekly + Daily MACD Positive) ---")
+        print("="*50)
+        print("  Screened from New Alpha Discoveries")
+        print("  Criteria: weekly MACD_12_26_9 > 0 AND daily MACD_12_26_9 > 0")
+        print()
+
+        if macd_df.empty:
+            print("  (No stocks meet MACD confirmation criteria today)")
+        else:
+            print(macd_df.to_string(index=False))
