@@ -4,6 +4,10 @@ from sqlalchemy import create_engine, text
 import numpy as np
 import argparse
 import math
+import warnings
+
+# Suppress pandas_ta's noisy pkg_resources deprecation warning
+warnings.filterwarnings('ignore', message='.*pkg_resources.*deprecated.*')
 
 # --- Configuration ---
 import os
@@ -708,7 +712,7 @@ def screen_macd_setup(picks_df, engine):
         weekly_active_daily = weekly_active.reindex(ts, method='ffill').astype(float).fillna(0.0).astype(bool)
 
         # --- Monthly MACD & Signal Crossover ---
-        monthly_close = daily_by_ts.resample('M').last().dropna()
+        monthly_close = daily_by_ts.resample('ME').last().dropna()
         monthly_cross_age = None
         m_macd_val = None
         m_signal_val = None
